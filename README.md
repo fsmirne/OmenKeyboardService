@@ -1,4 +1,4 @@
-# HP Omen Keyboard RGB Service
+# HP Omen Sequencer Keyboard RGB Service
 
 A Windows service that automatically controls the RGB LED colors on HP Omen keyboards. The service runs at Windows startup and applies custom color profiles based on a simple JSON configuration file.
 
