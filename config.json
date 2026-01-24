@@ -1,0 +1,13 @@
+{
+  "profileName": "Gaming",
+  "profile": {
+    "fps": "FF0000",
+    "arrows": "FF0000",
+    "fkeys": "0099FF",
+    "pkeys": "FF00FF",
+    "media": "FFFF00",
+    "numpad": "00FFFF",
+    "windows": "FF6600",
+	"esc": "FF6600"
+  }
+}
