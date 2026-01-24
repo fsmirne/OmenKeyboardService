@@ -29,6 +29,11 @@ if not exist "%SERVICE_PATH%" (
     exit /b 1
 )
 
+REM Register the Event Log source for application logging
+echo Registering Event Log source...
+powershell -Command "if (-not [System.Diagnostics.EventLog]::SourceExists('HP Omen Keyboard RGB Service')) { [System.Diagnostics.EventLog]::CreateEventSource('HP Omen Keyboard RGB Service', 'Application'); Write-Host 'Event Log source registered successfully' } else { Write-Host 'Event Log source already exists' }"
+echo.
+
 REM Stop the service if it's already running
 sc query %SERVICE_NAME% >nul 2>&1
 if %errorLevel% equ 0 (

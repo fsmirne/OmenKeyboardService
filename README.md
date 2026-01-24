@@ -46,9 +46,14 @@ Copy the following files from the publish folder to a permanent location (e.g., 
 
 1. Copy `install-service.bat` to the same folder as the executable
 2. Right-click `install-service.bat` and select **"Run as administrator"**
-3. The service will be installed and started automatically
+3. The installation script will:
+   - Register the Event Log source for application logging
+   - Install the Windows service
+   - Start the service automatically
 
 **Note**: The service is configured to start automatically at boot and will apply colors before you log in. It also monitors power events to restore colors after waking from sleep or hibernation.
+
+**Event Logging**: The installer automatically registers the service as an Event Log source. If you see a message "Event Log source already exists", this is normal and can be ignored.
 
 ## Configuration
 
@@ -278,35 +283,50 @@ The service uses the HID (Human Interface Device) protocol to communicate with t
 
 ### Logging
 
-Service logs are written to Windows Event Log with detailed information about every action:
-- Source: HP Omen Keyboard RGB Service
-- Location: Windows Logs → Application
+The service writes detailed logs to Windows Event Log with information about every action. The installation script automatically registers the Event Log source.
 
-View logs in Event Viewer:
+**Log Location:**
+- Source: `HP Omen Keyboard RGB Service`
+- Log Name: `Application`
+- Minimum Level: Information (includes Info, Warning, and Error messages)
+
+**View logs in Event Viewer:**
 1. Press `Win + R`, type `eventvwr.msc`, press Enter
 2. Navigate to Windows Logs → Application
 3. Look for events with source "HP Omen Keyboard RGB Service"
+4. You should see entries with Information (blue icon), Warning (yellow icon), or Error (red icon)
 
-View logs in PowerShell:
+**View logs in PowerShell:**
 ```powershell
 # View last 20 log entries
 Get-EventLog -LogName Application -Source "HP Omen Keyboard RGB Service" -Newest 20
 
-# View only errors
-Get-EventLog -LogName Application -Source "HP Omen Keyboard RGB Service" -EntryType Error -Newest 10
+# View only errors and warnings
+Get-EventLog -LogName Application -Source "HP Omen Keyboard RGB Service" -EntryType Error,Warning -Newest 10
 
-# View all logs since last sleep/wake
+# View all logs since last hour
 Get-EventLog -LogName Application -Source "HP Omen Keyboard RGB Service" -After (Get-Date).AddHours(-1)
+
+# View logs and format as table
+Get-EventLog -LogName Application -Source "HP Omen Keyboard RGB Service" -Newest 20 | Format-Table TimeGenerated, EntryType, Message -AutoSize
 ```
 
-Important log messages to look for:
-- "Service started successfully" - Service initialization
-- "System resumed from sleep" - Power event detected
-- "Session unlocked" - Lock/unlock event detected
-- "HP Omen keyboard reconnected" - USB device arrival detected
-- "Successfully applied colors" - Colors applied successfully
-- "Failed to apply colors (attempt X/Y)" - Retry in progress
-- "Failed to apply colors after X attempts" - All retries exhausted, keyboard not ready
+**Important log messages to look for:**
+- `HP Omen Keyboard RGB Service starting...` - Service initialization
+- `Service started successfully. Monitoring for config changes...` - Service ready
+- `Applying profile: [ProfileName]` - Loading configuration
+- `Successfully applied colors to keyboard. Groups configured: X` - Initial colors applied
+- `System resumed from sleep. Waiting for hardware to initialize...` - Power event detected
+- `Session unlocked. Waiting for keyboard to be ready...` - Lock/unlock event detected
+- `HP Omen keyboard reconnected (KVM switch or USB replug detected)` - USB device arrival
+- `Successfully applied colors on attempt X` - Colors applied after retry
+- `Failed to apply colors (attempt X/Y). Retrying in 1 second...` - Retry in progress
+- `Failed to apply colors after X attempts` - All retries exhausted, keyboard not ready
+
+**Troubleshooting logging issues:**
+- If you don't see any application logs after installation, restart the service
+- Verify the Event Log source is registered by running: `[System.Diagnostics.EventLog]::SourceExists('HP Omen Keyboard RGB Service')` in PowerShell (should return `True`)
+- Service Control Manager messages (service start/stop) appear separately and are normal
 
 ## Credits
 
