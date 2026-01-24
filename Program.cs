@@ -15,8 +15,9 @@ builder.Logging.AddEventLog(new EventLogSettings
     LogName = "Application"
 });
 
-// Set logging levels
+// Set logging levels - both globally and specifically for EventLog
 builder.Logging.SetMinimumLevel(LogLevel.Information);
+builder.Logging.AddFilter<EventLogLoggerProvider>(level => level >= LogLevel.Information);
 
 // Configure the service to run as a Windows Service
 builder.Services.AddWindowsService(options =>
