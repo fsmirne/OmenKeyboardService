@@ -1,7 +1,5 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Win32;
-using System.Management;
 using System.Text.Json;
 
 namespace OmenKeyboardService;
@@ -14,20 +12,18 @@ public class KeyboardRgbService : BackgroundService
 {
     private readonly ILogger<KeyboardRgbService> _logger;
     private readonly OmenKeyboardController _keyboardController;
+    private readonly IPlatformService _platformService;
     private readonly string _configPath;
     private FileSystemWatcher? _configWatcher;
-    private ManagementEventWatcher? _deviceArrivalWatcher;
-
-    // HP Omen keyboard USB identifiers (matching OmenKeyboardController)
-    private const int VENDOR_ID = 0x03F0;  // HP
-    private const int PRODUCT_ID = 0x1F41; // Omen keyboard
 
     public KeyboardRgbService(
         ILogger<KeyboardRgbService> logger,
-        OmenKeyboardController keyboardController)
+        OmenKeyboardController keyboardController,
+        IPlatformService platformService)
     {
         _logger = logger;
         _keyboardController = keyboardController;
+        _platformService = platformService;
 
         // Config file should be in the same directory as the executable
         _configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
@@ -35,7 +31,7 @@ public class KeyboardRgbService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("HP Omen Keyboard RGB Service starting...");
+        _logger.LogInformation("HP Omen Keyboard RGB Service starting on {Platform}...", _platformService.PlatformName);
 
         try
         {
@@ -45,13 +41,11 @@ public class KeyboardRgbService : BackgroundService
             // Set up file watcher to detect config changes
             SetupConfigWatcher();
 
-            // Subscribe to power mode changes to handle sleep/wake events
-            SetupPowerManagement();
+            // Initialize platform-specific services (power events, device monitoring, etc.)
+            _platformService.ColorReapplyRequested += OnColorReapplyRequested;
+            _platformService.Initialize();
 
-            // Start monitoring for keyboard reconnection (e.g., KVM switch)
-            SetupDeviceMonitoring();
-
-            _logger.LogInformation("Service started successfully. Monitoring for config changes, power events, session changes, and USB device reconnection...");
+            _logger.LogInformation("Service started successfully. Monitoring for config changes and platform events...");
 
             // Keep the service running
             await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -209,132 +203,35 @@ public class KeyboardRgbService : BackgroundService
         }
     }
 
+
     /// <summary>
-    /// Sets up power management event monitoring to restore colors after sleep/wake
+    /// Handles color reapply requests from the platform service
     /// </summary>
-    private void SetupPowerManagement()
+    private async void OnColorReapplyRequested(object? sender, ColorReapplyEventArgs e)
     {
         try
         {
-            SystemEvents.PowerModeChanged += OnPowerModeChanged;
-            SystemEvents.SessionSwitch += OnSessionSwitch;
-            _logger.LogInformation("Power management and session monitoring enabled");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to set up power management monitoring");
-        }
-    }
-
-    /// <summary>
-    /// Handles power mode changes (sleep, resume, battery status)
-    /// </summary>
-    private async void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
-    {
-        try
-        {
-            _logger.LogInformation("Power mode changed: {Mode}", e.Mode);
-
-            // Reapply colors when resuming from sleep or suspend
-            if (e.Mode == PowerModes.Resume)
-            {
-                _logger.LogInformation("System resumed from sleep. Waiting for hardware to initialize...");
-
-                // Longer delay to allow hardware to fully initialize after wake
-                // Some systems need more time for USB devices to be ready
-                await Task.Delay(2000);
-
-                _logger.LogInformation("Attempting to reapply keyboard colors after resume...");
-                await ApplyConfigurationAsync(retryCount: 5);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error handling power mode change");
-        }
-    }
-
-    /// <summary>
-    /// Handles session switch events (lock, unlock, remote connect/disconnect)
-    /// </summary>
-    private async void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
-    {
-        try
-        {
-            _logger.LogInformation("Session event: {Reason}", e.Reason);
-
-            // Reapply colors when unlocking the session
-            if (e.Reason == SessionSwitchReason.SessionUnlock)
-            {
-                _logger.LogInformation("Session unlocked. Waiting for keyboard to be ready...");
-
-                // Delay to allow keyboard to wake from low-power state
-                await Task.Delay(1000);
-
-                _logger.LogInformation("Attempting to reapply keyboard colors after unlock...");
-                await ApplyConfigurationAsync(retryCount: 5);
-            }
-            // Also handle remote desktop connections
-            else if (e.Reason == SessionSwitchReason.ConsoleConnect ||
-                     e.Reason == SessionSwitchReason.RemoteConnect)
-            {
-                _logger.LogInformation("Console/Remote connected. Reapplying keyboard colors...");
-
-                await Task.Delay(500);
-
-                await ApplyConfigurationAsync(retryCount: 3);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error handling session switch");
-        }
-    }
-
-    /// <summary>
-    /// Sets up WMI event monitoring to detect keyboard reconnection (e.g., KVM switch, USB replug)
-    /// </summary>
-    private void SetupDeviceMonitoring()
-    {
-        try
-        {
-            // WMI query to watch for USB device arrival events
-            // This fires immediately when any USB device is connected
-            var query = new WqlEventQuery(
-                "SELECT * FROM __InstanceCreationEvent WITHIN 1 " +
-                "WHERE TargetInstance ISA 'Win32_PnPEntity' " +
-                "AND TargetInstance.DeviceID LIKE 'HID\\\\VID_03F0&PID_1F41%'");
-
-            _deviceArrivalWatcher = new ManagementEventWatcher(query);
-            _deviceArrivalWatcher.EventArrived += OnDeviceArrived;
-            _deviceArrivalWatcher.Start();
-
-            _logger.LogInformation("USB device monitoring enabled. Will detect keyboard reconnection instantly (KVM switch, USB replug, etc.)");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to set up USB device monitoring. Keyboard reconnection detection will not work.");
-        }
-    }
-
-    /// <summary>
-    /// Handles USB device arrival events and reapplies colors when the keyboard reconnects
-    /// </summary>
-    private async void OnDeviceArrived(object sender, EventArrivedEventArgs e)
-    {
-        try
-        {
-            _logger.LogInformation("HP Omen keyboard reconnected (KVM switch or USB replug detected). Waiting for device initialization...");
+            _logger.LogInformation("{Reason}. Waiting {DelayMs}ms for device initialization...", e.Reason, e.DelayMs);
 
             // Delay to allow device to fully initialize
-            await Task.Delay(1000);
+            await Task.Delay(e.DelayMs);
 
-            _logger.LogInformation("Attempting to apply colors to reconnected keyboard...");
-            await ApplyConfigurationAsync(retryCount: 5);
+            _logger.LogInformation("Attempting to reapply keyboard colors...");
+
+            // Try to apply configuration - if keyboard is not present, this will fail gracefully
+            try
+            {
+                await ApplyConfigurationAsync(retryCount: e.RetryCount);
+            }
+            catch (Exception ex)
+            {
+                // Log but don't crash - device might not be ready or not our keyboard
+                _logger.LogWarning(ex, "Failed to reapply colors. Device may not be ready or connected.");
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling device arrival");
+            _logger.LogError(ex, "Error handling color reapply request");
         }
     }
 
@@ -370,15 +267,8 @@ public class KeyboardRgbService : BackgroundService
     public override void Dispose()
     {
         _configWatcher?.Dispose();
-
-        if (_deviceArrivalWatcher != null)
-        {
-            _deviceArrivalWatcher.Stop();
-            _deviceArrivalWatcher.Dispose();
-        }
-
-        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
-        SystemEvents.SessionSwitch -= OnSessionSwitch;
+        _platformService.ColorReapplyRequested -= OnColorReapplyRequested;
+        _platformService.Dispose();
         base.Dispose();
     }
 }

@@ -1,0 +1,27 @@
+[Unit]
+Description=HP Omen Sequencer Keyboard RGB Service
+After=network.target
+
+[Service]
+Type=notify
+# Path to the executable - update this to match your installation directory
+ExecStart=/usr/local/bin/omen-keyboard-rgb/OmenKeyboardService
+WorkingDirectory=/usr/local/bin/omen-keyboard-rgb
+Restart=on-failure
+RestartSec=5s
+
+# Run as root to access HID devices
+User=root
+Group=root
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=omen-keyboard-rgb
+
+[Install]
+WantedBy=multi-user.target

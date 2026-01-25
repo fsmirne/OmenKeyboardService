@@ -32,7 +32,7 @@ echo Build completed successfully!
 echo ============================================
 echo.
 echo Output location:
-echo bin\Release\net8.0-windows\win-x64\publish\
+echo bin\Release\net8.0\win-x64\publish\
 echo.
 echo Next steps:
 echo 1. Copy the contents of the publish folder to a permanent location
