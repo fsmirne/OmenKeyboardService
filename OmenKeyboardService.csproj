@@ -42,5 +42,19 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+  
+  <!-- Windows-specific scripts -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(OS)' == 'Windows_NT'">
+    <None Update="install-service.bat;uninstall-service.bat;start-service.bat;stop-service.bat">
+       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Linux-specific scripts and service file -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' OR ('$(OS)' != 'Windows_NT' AND '$(RuntimeIdentifier)' == '')">
+    <None Update="install-service.sh;uninstall-service.sh;start-service.sh;stop-service.sh;omen-keyboard-rgb.service">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 
 </Project>
