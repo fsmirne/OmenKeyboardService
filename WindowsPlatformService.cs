@@ -22,6 +22,11 @@ public class WindowsPlatformService : IPlatformService
     private const int VENDOR_ID = 0x03F0;
     private const int PRODUCT_ID = 0x1F41;
 
+    // Deduplication system to prevent rapid successive reapplications
+    private DateTime _lastReapplyTime = DateTime.MinValue;
+    private const int _deduplicationWindow = 3000; // 3 seconds
+    private readonly object _reapplyLock = new object();
+
     public string PlatformName => "Windows";
 
     public event EventHandler<ColorReapplyEventArgs>? ColorReapplyRequested;
@@ -54,7 +59,7 @@ public class WindowsPlatformService : IPlatformService
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
             // Use Win32 API for session notifications (more reliable for services)
-            _sessionWindow = new SessionNotificationWindow(_logger, OnSessionChange);
+            _sessionWindow = new SessionNotificationWindow(_logger, OnSessionChange, OnDisplayPowerChange);
             _sessionWindow.Initialize();
 
             _logger.LogInformation("Power management and session monitoring enabled");
@@ -78,18 +83,46 @@ public class WindowsPlatformService : IPlatformService
             if (e.Mode == PowerModes.Resume)
             {
                 _logger.LogInformation("System resumed from sleep. Requesting color reapplication...");
-
-                ColorReapplyRequested?.Invoke(this, new ColorReapplyEventArgs
-                {
-                    Reason = "System resumed from sleep",
-                    DelayMs = 2000,  // Longer delay for hardware initialization
-                    RetryCount = 5
-                });
+                RequestColorReapply("System resumed from sleep", 2000, 5);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error handling power mode change");
+        }
+    }
+
+    /// <summary>
+    /// Requests a color reapplication with deduplication to prevent rapid successive triggers
+    /// </summary>
+    /// <param name="reason">Reason for the reapplication request</param>
+    /// <param name="delayMs">Delay before applying colors</param>
+    /// <param name="retryCount">Number of retry attempts</param>
+    private void RequestColorReapply(string reason, int delayMs, int retryCount)
+    {
+        lock (_reapplyLock)
+        {
+            var now = DateTime.UtcNow;
+            var timeSinceLastReapply = (now - _lastReapplyTime).TotalMilliseconds;
+
+            if (timeSinceLastReapply < _deduplicationWindow)
+            {
+                _logger.LogInformation(
+                    "Skipping color reapply request (reason: {Reason}). " +
+                    "Last reapply was {TimeSinceLastReapply}ms ago (within {Window}ms deduplication window)",
+                    reason, (int)timeSinceLastReapply, _deduplicationWindow);
+                return;
+            }
+
+            _logger.LogInformation("Processing color reapply request: {Reason}", reason);
+            _lastReapplyTime = now;
+
+            ColorReapplyRequested?.Invoke(this, new ColorReapplyEventArgs
+            {
+                Reason = reason,
+                DelayMs = delayMs,
+                RetryCount = retryCount
+            });
         }
     }
 
@@ -106,31 +139,41 @@ public class WindowsPlatformService : IPlatformService
             if (reason == SessionChangeReason.SessionUnlock)
             {
                 _logger.LogInformation("Session unlocked. Requesting color reapplication...");
-
-                ColorReapplyRequested?.Invoke(this, new ColorReapplyEventArgs
-                {
-                    Reason = "Session unlocked",
-                    DelayMs = 1000,
-                    RetryCount = 5
-                });
+                RequestColorReapply("Session unlocked", 1000, 5);
+            }
+            // Handle session logon (fires before unlock, when user logs into account)
+            else if (reason == SessionChangeReason.SessionLogon)
+            {
+                _logger.LogInformation("Session logon detected. Requesting color reapplication...");
+                RequestColorReapply("Session logon", 1500, 5);
             }
             // Also handle remote desktop connections
             else if (reason == SessionChangeReason.ConsoleConnect ||
                      reason == SessionChangeReason.RemoteConnect)
             {
                 _logger.LogInformation("Console/Remote connected. Requesting color reapplication...");
-
-                ColorReapplyRequested?.Invoke(this, new ColorReapplyEventArgs
-                {
-                    Reason = "Console/Remote connected",
-                    DelayMs = 500,
-                    RetryCount = 3
-                });
+                RequestColorReapply("Console/Remote connected", 500, 3);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error handling session change");
+        }
+    }
+
+    /// <summary>
+    /// Handles display power change events (fires when display powers on from sleep/off state)
+    /// </summary>
+    private void OnDisplayPowerChange()
+    {
+        try
+        {
+            _logger.LogInformation("Display powered on. Requesting color reapplication...");
+            RequestColorReapply("Display powered on", 500, 3);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error handling display power change");
         }
     }
 
@@ -168,13 +211,7 @@ public class WindowsPlatformService : IPlatformService
         try
         {
             _logger.LogInformation("HP Omen keyboard reconnected (KVM switch or USB replug detected)");
-
-            ColorReapplyRequested?.Invoke(this, new ColorReapplyEventArgs
-            {
-                Reason = "HP Omen keyboard reconnected",
-                DelayMs = 1000,
-                RetryCount = 5
-            });
+            RequestColorReapply("HP Omen keyboard reconnected", 1000, 5);
         }
         catch (Exception ex)
         {
@@ -218,12 +255,21 @@ public class WindowsPlatformService : IPlatformService
     private class SessionNotificationWindow : IDisposable
     {
         private const int WM_WTSSESSION_CHANGE = 0x02B1;
+        private const int WM_POWERBROADCAST = 0x0218;
+        private const int PBT_POWERSETTINGCHANGE = 0x8013;
         private const int NOTIFY_FOR_ALL_SESSIONS = 1;
+
+        // Display power state GUIDs
+        private static readonly Guid GUID_CONSOLE_DISPLAY_STATE = new Guid("6fe69556-704a-47a0-8f24-c28d936fda47");
+        private static readonly Guid GUID_MONITOR_POWER_ON = new Guid("02731015-4510-4526-99e6-e5a17ebd1aea");
 
         private readonly ILogger _logger;
         private readonly Action<SessionChangeReason> _onSessionChange;
+        private readonly Action? _onDisplayPowerChange;
         private IntPtr _hwnd;
         private WndProcDelegate? _wndProcDelegate;
+        private IntPtr _displayPowerNotifyHandle;
+        private IntPtr _monitorPowerNotifyHandle;
 
         [DllImport("wtsapi32.dll", SetLastError = true)]
         private static extern bool WTSRegisterSessionNotification(IntPtr hWnd, int dwFlags);
@@ -252,6 +298,12 @@ public class WindowsPlatformService : IPlatformService
         [DllImport("kernel32.dll")]
         private static extern IntPtr GetModuleHandle(string? lpModuleName);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr RegisterPowerSettingNotification(IntPtr hRecipient, ref Guid PowerSettingGuid, int Flags);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UnregisterPowerSettingNotification(IntPtr Handle);
+
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct WNDCLASSEX
         {
@@ -269,12 +321,21 @@ public class WindowsPlatformService : IPlatformService
             public IntPtr hIconSm;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POWERBROADCAST_SETTING
+        {
+            public Guid PowerSetting;
+            public uint DataLength;
+            public byte Data;
+        }
+
         private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
-        public SessionNotificationWindow(ILogger logger, Action<SessionChangeReason> onSessionChange)
+        public SessionNotificationWindow(ILogger logger, Action<SessionChangeReason> onSessionChange, Action? onDisplayPowerChange = null)
         {
             _logger = logger;
             _onSessionChange = onSessionChange;
+            _onDisplayPowerChange = onDisplayPowerChange;
         }
 
         public void Initialize()
@@ -321,6 +382,34 @@ public class WindowsPlatformService : IPlatformService
                     return;
                 }
 
+                // Register for display power notifications
+                if (_onDisplayPowerChange != null)
+                {
+                    var displayGuid = GUID_CONSOLE_DISPLAY_STATE;
+                    _displayPowerNotifyHandle = RegisterPowerSettingNotification(_hwnd, ref displayGuid, 0);
+                    if (_displayPowerNotifyHandle == IntPtr.Zero)
+                    {
+                        int error = Marshal.GetLastWin32Error();
+                        _logger.LogWarning("Failed to register for display power notifications (error: {Error})", error);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Registered for display power notifications");
+                    }
+
+                    var monitorGuid = GUID_MONITOR_POWER_ON;
+                    _monitorPowerNotifyHandle = RegisterPowerSettingNotification(_hwnd, ref monitorGuid, 0);
+                    if (_monitorPowerNotifyHandle == IntPtr.Zero)
+                    {
+                        int error = Marshal.GetLastWin32Error();
+                        _logger.LogWarning("Failed to register for monitor power notifications (error: {Error})", error);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Registered for monitor power notifications");
+                    }
+                }
+
                 _logger.LogInformation("Win32 session notification window registered successfully");
             }
             catch (Exception ex)
@@ -343,12 +432,53 @@ public class WindowsPlatformService : IPlatformService
                     _logger.LogError(ex, "Error processing session change notification");
                 }
             }
+            else if (msg == WM_POWERBROADCAST && wParam.ToInt32() == PBT_POWERSETTINGCHANGE)
+            {
+                try
+                {
+                    // Parse POWERBROADCAST_SETTING structure
+                    var setting = Marshal.PtrToStructure<POWERBROADCAST_SETTING>(lParam);
+
+                    // Check if this is a display or monitor power event
+                    if (setting.PowerSetting == GUID_CONSOLE_DISPLAY_STATE ||
+                        setting.PowerSetting == GUID_MONITOR_POWER_ON)
+                    {
+                        // Data field contains the power state: 0 = off, 1 = on, 2 = dimmed
+                        if (setting.Data == 1)
+                        {
+                            _logger.LogInformation("Display powered ON. Requesting color reapplication...");
+                            _onDisplayPowerChange?.Invoke();
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Display power state changed to: {State}", setting.Data);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing power broadcast notification");
+                }
+            }
 
             return DefWindowProc(hWnd, msg, wParam, lParam);
         }
 
         public void Dispose()
         {
+            // Unregister power notifications
+            if (_displayPowerNotifyHandle != IntPtr.Zero)
+            {
+                UnregisterPowerSettingNotification(_displayPowerNotifyHandle);
+                _displayPowerNotifyHandle = IntPtr.Zero;
+            }
+
+            if (_monitorPowerNotifyHandle != IntPtr.Zero)
+            {
+                UnregisterPowerSettingNotification(_monitorPowerNotifyHandle);
+                _monitorPowerNotifyHandle = IntPtr.Zero;
+            }
+
             if (_hwnd != IntPtr.Zero)
             {
                 WTSUnRegisterSessionNotification(_hwnd);
