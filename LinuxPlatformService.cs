@@ -15,6 +15,8 @@ public class LinuxPlatformService : IPlatformService
     private bool _bootupPeriod = true;
     private readonly SemaphoreSlim _verificationSemaphore = new SemaphoreSlim(1, 1);
     private bool _keyboardFoundDuringBoot = false;
+    private System.Threading.Timer? _debounceTimer;
+    private readonly object _debounceLock = new object();
 
     // HP Omen keyboard USB identifiers
     private const int VENDOR_ID = 0x03F0;  // HP
@@ -82,6 +84,7 @@ public class LinuxPlatformService : IPlatformService
 
     /// <summary>
     /// Handles device creation events and reapplies colors when a new HID device is detected
+    /// Uses debouncing during boot to prevent CPU spikes from rapid device enumeration
     /// </summary>
     private void OnDeviceCreated(object sender, FileSystemEventArgs e)
     {
@@ -99,8 +102,21 @@ public class LinuxPlatformService : IPlatformService
                     return;
                 }
 
-                _logger.LogDebug("Boot period active - verifying device before triggering reapply");
-                _ = VerifyAndTriggerReapplyAsync(e.Name);
+                // Use debouncing to prevent checking on every single device event during boot
+                // This prevents 100% CPU usage from rapid HID device enumeration
+                lock (_debounceLock)
+                {
+                    _logger.LogDebug("Boot period active - scheduling debounced device check");
+
+                    // Reset the timer on each event - only check after events settle for 500ms
+                    _debounceTimer?.Dispose();
+                    _debounceTimer = new System.Threading.Timer(
+                        _ => VerifyAndTriggerReapplyAsync(e.Name).GetAwaiter().GetResult(),
+                        null,
+                        500,  // Wait 500ms after the last event before checking
+                        Timeout.Infinite
+                    );
+                }
             }
             else
             {
@@ -179,9 +195,16 @@ public class LinuxPlatformService : IPlatformService
                     }
                     else
                     {
-                        // Not our keyboard, exit early
-                        _logger.LogDebug("Device {DeviceName} is not HP Omen keyboard", deviceName);
-                        return;
+                        // Not found yet, but retry (might not be ready during boot)
+                        _logger.LogDebug("HP Omen keyboard not found on attempt {Attempt}/{MaxRetries}",
+                            attempt + 1, maxRetries);
+
+                        // Continue to next retry unless this was the last attempt
+                        if (attempt == maxRetries - 1)
+                        {
+                            _logger.LogDebug("HP Omen keyboard not found after {MaxRetries} attempts, giving up", maxRetries);
+                            return;
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -227,6 +250,7 @@ public class LinuxPlatformService : IPlatformService
     {
         _deviceWatcher?.Dispose();
         _verificationSemaphore?.Dispose();
+        _debounceTimer?.Dispose();
     }
 }
 #endif
