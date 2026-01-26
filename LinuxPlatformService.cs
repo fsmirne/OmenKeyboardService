@@ -13,6 +13,8 @@ public class LinuxPlatformService : IPlatformService
     private readonly ILogger<LinuxPlatformService> _logger;
     private FileSystemWatcher? _deviceWatcher;
     private bool _bootupPeriod = true;
+    private readonly SemaphoreSlim _verificationSemaphore = new SemaphoreSlim(1, 1);
+    private bool _keyboardFoundDuringBoot = false;
 
     // HP Omen keyboard USB identifiers
     private const int VENDOR_ID = 0x03F0;  // HP
@@ -63,6 +65,7 @@ public class LinuxPlatformService : IPlatformService
                 Task.Delay(10000).ContinueWith(_ =>
                 {
                     _bootupPeriod = false;
+                    _keyboardFoundDuringBoot = false; // Reset for future reconnections
                     _logger.LogInformation("Boot period complete, device monitoring now fully active");
                 });
             }
@@ -89,6 +92,13 @@ public class LinuxPlatformService : IPlatformService
             // During boot, be more cautious and verify before triggering
             if (_bootupPeriod)
             {
+                // Skip if we already found and triggered for the keyboard during boot
+                if (_keyboardFoundDuringBoot)
+                {
+                    _logger.LogDebug("Keyboard already found during boot, skipping verification");
+                    return;
+                }
+
                 _logger.LogDebug("Boot period active - verifying device before triggering reapply");
                 _ = VerifyAndTriggerReapplyAsync(e.Name);
             }
@@ -113,58 +123,83 @@ public class LinuxPlatformService : IPlatformService
     /// <summary>
     /// Verifies if the newly detected device is the HP Omen keyboard before triggering a color reapply
     /// Uses retry logic with exponential backoff to handle boot-time race conditions
+    /// Throttled to prevent multiple concurrent verifications during boot
     /// </summary>
     private async Task VerifyAndTriggerReapplyAsync(string deviceName)
     {
-        const int maxRetries = 5;
-        const int initialDelayMs = 100;
-
-        for (int attempt = 0; attempt < maxRetries; attempt++)
+        // Use semaphore to ensure only one verification runs at a time
+        // This prevents CPU spikes from many concurrent HidSharp enumerations during boot
+        if (!await _verificationSemaphore.WaitAsync(0))
         {
-            try
-            {
-                // Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms
-                if (attempt > 0)
-                {
-                    int delayMs = initialDelayMs * (1 << (attempt - 1));
-                    _logger.LogDebug("Retry attempt {Attempt}/{MaxRetries} after {Delay}ms delay",
-                        attempt + 1, maxRetries, delayMs);
-                    await Task.Delay(delayMs);
-                }
-
-                // Check if HP Omen keyboard is present
-                if (IsOmenKeyboardPresent())
-                {
-                    _logger.LogInformation("HP Omen keyboard verified (attempt {Attempt}). Triggering color reapply...",
-                        attempt + 1);
-
-                    ColorReapplyRequested?.Invoke(this, new ColorReapplyEventArgs
-                    {
-                        Reason = $"HP Omen keyboard reconnected (verified after {attempt + 1} attempts)",
-                        DelayMs = 1500,
-                        RetryCount = 3
-                    });
-
-                    return; // Success!
-                }
-                else
-                {
-                    // Not our keyboard, exit early
-                    _logger.LogDebug("Device {DeviceName} is not HP Omen keyboard", deviceName);
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to verify device on attempt {Attempt}/{MaxRetries}",
-                    attempt + 1, maxRetries);
-
-                // Continue to next retry
-            }
+            _logger.LogDebug("Verification already in progress, skipping duplicate check for {DeviceName}", deviceName);
+            return;
         }
 
-        _logger.LogDebug("Failed to verify device {DeviceName} after {MaxRetries} attempts",
-            deviceName, maxRetries);
+        try
+        {
+            // Check again in case another task completed while we were waiting
+            if (_keyboardFoundDuringBoot)
+            {
+                _logger.LogDebug("Keyboard already found by another task, exiting");
+                return;
+            }
+
+            const int maxRetries = 5;
+            const int initialDelayMs = 100;
+
+            for (int attempt = 0; attempt < maxRetries; attempt++)
+            {
+                try
+                {
+                    // Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms
+                    if (attempt > 0)
+                    {
+                        int delayMs = initialDelayMs * (1 << (attempt - 1));
+                        _logger.LogDebug("Retry attempt {Attempt}/{MaxRetries} after {Delay}ms delay",
+                            attempt + 1, maxRetries, delayMs);
+                        await Task.Delay(delayMs);
+                    }
+
+                    // Check if HP Omen keyboard is present
+                    if (IsOmenKeyboardPresent())
+                    {
+                        _logger.LogInformation("HP Omen keyboard verified (attempt {Attempt}). Triggering color reapply...",
+                            attempt + 1);
+
+                        _keyboardFoundDuringBoot = true;
+
+                        ColorReapplyRequested?.Invoke(this, new ColorReapplyEventArgs
+                        {
+                            Reason = $"HP Omen keyboard reconnected (verified after {attempt + 1} attempts)",
+                            DelayMs = 1500,
+                            RetryCount = 3
+                        });
+
+                        return; // Success!
+                    }
+                    else
+                    {
+                        // Not our keyboard, exit early
+                        _logger.LogDebug("Device {DeviceName} is not HP Omen keyboard", deviceName);
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to verify device on attempt {Attempt}/{MaxRetries}",
+                        attempt + 1, maxRetries);
+
+                    // Continue to next retry
+                }
+            }
+
+            _logger.LogDebug("Failed to verify device {DeviceName} after {MaxRetries} attempts",
+                deviceName, maxRetries);
+        }
+        finally
+        {
+            _verificationSemaphore.Release();
+        }
     }
 
     /// <summary>
@@ -191,6 +226,7 @@ public class LinuxPlatformService : IPlatformService
     public void Dispose()
     {
         _deviceWatcher?.Dispose();
+        _verificationSemaphore?.Dispose();
     }
 }
 #endif
