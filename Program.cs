@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OmenKeyboardService;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 
 // Create a host builder that works on both Windows and Linux
 var builder = Host.CreateApplicationBuilder(args);
@@ -10,6 +11,31 @@ var builder = Host.CreateApplicationBuilder(args);
 // Detect the operating system
 bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 bool isLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+
+// Read log level from config.json
+LogLevel minimumLogLevel = LogLevel.Warning; // Default to Warning
+try
+{
+    var configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
+    if (File.Exists(configPath))
+    {
+        var json = File.ReadAllText(configPath);
+        var config = JsonSerializer.Deserialize<KeyboardConfig>(json, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            ReadCommentHandling = JsonCommentHandling.Skip
+        });
+
+        if (config?.LogLevel != null && Enum.TryParse<LogLevel>(config.LogLevel, true, out var parsedLevel))
+        {
+            minimumLogLevel = parsedLevel;
+        }
+    }
+}
+catch
+{
+    // If config reading fails, use default Warning level
+}
 
 // Configure logging based on platform
 builder.Logging.ClearProviders();
@@ -23,7 +49,7 @@ if (isWindows)
         SourceName = "HP Omen Keyboard RGB Service",
         LogName = "Application"
     });
-    builder.Logging.AddFilter<Microsoft.Extensions.Logging.EventLog.EventLogLoggerProvider>(level => level >= LogLevel.Information);
+    builder.Logging.AddFilter<Microsoft.Extensions.Logging.EventLog.EventLogLoggerProvider>(level => level >= minimumLogLevel);
 #endif
 }
 else
@@ -35,8 +61,8 @@ else
     });
 }
 
-// Set logging levels
-builder.Logging.SetMinimumLevel(LogLevel.Information);
+// Set logging levels from config
+builder.Logging.SetMinimumLevel(minimumLogLevel);
 
 // Configure platform-specific service hosting
 if (isWindows)

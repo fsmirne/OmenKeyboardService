@@ -148,6 +148,7 @@ Edit `config.json` to set your desired colors:
 ```json
 {
   "profileName": "Gaming",
+  "logLevel": "Warning",
   "profile": {
     "fps": "FF0000",
     "arrows": "FF0000",
@@ -159,6 +160,33 @@ Edit `config.json` to set your desired colors:
   }
 }
 ```
+
+### Log Level Configuration
+
+The `logLevel` field controls how much detail the service logs. This is useful for reducing Event Log clutter in normal operation while still being able to enable detailed logging for debugging.
+
+**Available log levels:**
+- `Warning` (Default) - Only logs warnings and errors. Recommended for normal use to keep Event Logs clean.
+- `Information` - Logs all operations including startup, config changes, session events, and color applications. Use this when debugging issues.
+- `Error` - Only logs critical errors. Minimal logging.
+- `Debug` - Very detailed logging including internal operations. Very verbose, use only for deep debugging.
+
+**To change the log level:**
+1. Edit `config.json` and change the `logLevel` value
+2. Stop and restart the service for the change to take effect
+
+**Example - Enable detailed logging for debugging:**
+```json
+{
+  "profileName": "Gaming",
+  "logLevel": "Information",
+  "profile": {
+    ...
+  }
+}
+```
+
+**Note:** The log level change requires a service restart. After changing the log level in `config.json`, you must stop and start the service using the service management commands or scripts.
 
 ### Available Key Groups
 
@@ -507,7 +535,7 @@ The service uses the HID (Human Interface Device) protocol to communicate with t
 
 ### Logging
 
-The service writes detailed logs about every action.
+The service logs important events and errors. The log verbosity is controlled by the `logLevel` setting in `config.json` (default: `Warning`). See [Log Level Configuration](#log-level-configuration) for details.
 
 #### Windows Logging
 
@@ -516,7 +544,7 @@ Logs are written to Windows Event Log. The installation script automatically reg
 **Log Location:**
 - Source: `HP Omen Keyboard RGB Service`
 - Log Name: `Application`
-- Minimum Level: Information (includes Info, Warning, and Error messages)
+- Minimum Level: Configurable via `logLevel` in `config.json` (default: Warning)
 
 **View logs in Event Viewer:**
 1. Press `Win + R`, type `eventvwr.msc`, press Enter

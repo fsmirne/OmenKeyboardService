@@ -243,6 +243,7 @@ public class KeyboardRgbService : BackgroundService
         var defaultConfig = new KeyboardConfig
         {
             ProfileName = "Gaming",
+            LogLevel = "Warning",
             Profile = new Dictionary<string, string>
             {
                 ["fps"] = "FF0000",        // WASD keys - Red
@@ -290,4 +291,12 @@ public class KeyboardConfig
     /// Color format: "RRGGBB" (e.g., "FF0000" for red)
     /// </summary>
     public Dictionary<string, string> Profile { get; set; } = new();
+
+    /// <summary>
+    /// Minimum log level for the service
+    /// Valid values: "Trace", "Debug", "Information", "Warning", "Error", "Critical", "None"
+    /// Default: "Warning" (only warnings and errors will be logged)
+    /// Set to "Information" to enable detailed logging for debugging
+    /// </summary>
+    public string? LogLevel { get; set; }
 }

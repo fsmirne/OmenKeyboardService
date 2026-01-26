@@ -1,5 +1,6 @@
 {
   "profileName": "Gaming",
+  "logLevel": "Warning",
   "profile": {
     "fps": "FF0000",
     "arrows": "FF0000",
