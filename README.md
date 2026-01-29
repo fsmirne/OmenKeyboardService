@@ -13,7 +13,7 @@ A cross-platform service that automatically controls the RGB LED colors on HP Om
 - **USB Reconnection**: Automatically detects keyboard reconnection and restores colors when using KVM switches or replug events
 - **Platform-Specific Features**:
   - **Windows**: Power management (sleep/wake), session lock/unlock detection, display power monitoring, user presence detection, WMI device monitoring
-  - **Linux**: Device monitoring via /dev filesystem watching
+  - **Linux**: Power management (suspend/resume), device monitoring via /dev filesystem with smart keyboard detection
 - **JSON Configuration**: Easy-to-edit configuration file for color profiles
 - **Hot Reload**: Automatically detects config file changes and applies new colors
 - **Key Groups**: Control multiple keys at once (WASD, arrows, function keys, etc.)
@@ -462,6 +462,23 @@ If colors don't restore when returning from screen timeout:
 3. **Check power settings**: Ensure Windows is configured to turn off the display after inactivity (Settings → System → Power & sleep)
 4. **Manual trigger**: Edit and save `config.json` to manually reapply colors
 
+#### Linux: Colors Reset After Suspend/Resume
+
+The service monitors system suspend/resume events by watching `/sys/power/wakeup_count` for changes. When the system resumes from suspend, the service automatically restores colors after a 2-second delay to allow hardware to initialize.
+
+If colors don't restore after suspend/resume:
+
+1. **Check logs**: Look for "System resumed from suspend" messages
+   ```bash
+   sudo journalctl -u omen-keyboard-rgb -n 20 | grep -i "resumed\|suspend"
+   ```
+2. **Verify wakeup_count is accessible**: The service monitors `/sys/power/wakeup_count`
+   ```bash
+   cat /sys/power/wakeup_count
+   ```
+3. **Verify service is running**: Check `sudo systemctl status omen-keyboard-rgb`
+4. **Manual trigger**: Edit and save `config.json` to manually reapply colors
+
 ### KVM Switch / USB Reconnection (All Platforms)
 
 The service automatically detects keyboard reconnection and restores colors. This works for:
@@ -471,13 +488,13 @@ The service automatically detects keyboard reconnection and restores colors. Thi
 - **USB hub changes**: When moving the keyboard to a different USB port
 
 **Windows**: Uses WMI events to instantly detect the HP Omen keyboard specifically (within 500ms)
-**Linux**: Monitors /dev/hidraw* for new device creation (within 1.5 seconds)
+**Linux**: Monitors /dev/hidraw* for new device creation, verifies via sysfs that it's the HP Omen keyboard (VID:03F0, PID:1F41) before triggering (within 1.5 seconds)
 
 If colors don't restore after reconnection:
 
 1. **Check logs**:
    - Windows: Event Viewer for "HP Omen keyboard reconnected" messages
-   - Linux: `sudo journalctl -u omen-keyboard-rgb -f` for "New HID device detected" messages
+   - Linux: `sudo journalctl -u omen-keyboard-rgb -f` for "HP Omen keyboard detected" messages
 2. **Check USB power**: Some KVM switches may not provide adequate power to the keyboard
 3. **Manual trigger**: Edit and save `config.json` to manually reapply colors
 
@@ -526,7 +543,7 @@ The service uses a cross-platform architecture with platform-specific implementa
 - **Common Code**: `KeyboardRgbService`, `OmenKeyboardController`, HID communication
 - **Platform Abstraction**: `IPlatformService` interface
 - **Windows Implementation**: `WindowsPlatformService` - WMI device monitoring, power events (sleep/wake), session events (lock/unlock/logon), display power notifications, user presence detection
-- **Linux Implementation**: `LinuxPlatformService` - /dev filesystem monitoring for device changes
+- **Linux Implementation**: `LinuxPlatformService` - /dev filesystem monitoring with keyboard-specific filtering, suspend/resume detection via sysfs wakeup_count monitoring
 
 ### How It Works
 
@@ -538,7 +555,7 @@ The service uses a cross-platform architecture with platform-specific implementa
 6. Monitors config file for changes and reloads automatically
 7. Monitors platform-specific events:
    - **Windows**: Power events (sleep/wake), session events (lock/unlock), display power state changes, user presence detection (idle/active), WMI USB device arrival
-   - **Linux**: /dev/hidraw* device creation events
+   - **Linux**: Power events (suspend/resume via wakeup_count), /dev/hidraw* device creation with keyboard-specific filtering via sysfs
 8. Automatically restores colors when keyboard reconnects (KVM switches, USB replug, etc.)
 
 ### HID Protocol
@@ -610,7 +627,7 @@ Look for these messages in the logs (both platforms):
 - `Successfully applied colors to keyboard. Groups configured: X` - Colors applied
 - Platform-specific events:
   - Windows: `System resumed from sleep`, `Session unlocked`, `Display powered ON`, `User presence detected (returned from idle)`, `HP Omen keyboard reconnected (KVM switch or USB replug detected)`
-  - Linux: `New HID device detected`
+  - Linux: `System resumed from suspend`, `HP Omen keyboard detected`, `New HID device detected`
 - `Successfully applied colors on attempt X` - Colors applied after retry
 - `Failed to apply colors after X attempts` - All retries exhausted
 

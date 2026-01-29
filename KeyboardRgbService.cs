@@ -16,6 +16,10 @@ public class KeyboardRgbService : BackgroundService
     private readonly string _configPath;
     private FileSystemWatcher? _configWatcher;
 
+    // Debouncing for config file changes
+    private CancellationTokenSource? _configChangeCts;
+    private readonly object _configChangeLock = new object();
+
     public KeyboardRgbService(
         ILogger<KeyboardRgbService> logger,
         OmenKeyboardController keyboardController,
@@ -110,12 +114,13 @@ public class KeyboardRgbService : BackgroundService
     }
 
     /// <summary>
-    /// Applies colors with retry logic in case keyboard is not ready
+    /// Applies colors with retry logic using exponential backoff in case keyboard is not ready
     /// </summary>
     private async Task ApplyColorsWithRetry(Dictionary<string, uint> colorMap, int maxRetries)
     {
         int attempt = 0;
         Exception? lastException = null;
+        int delayMs = 500; // Start with 500ms, then 1s, 2s, 4s, etc.
 
         while (attempt < maxRetries)
         {
@@ -138,9 +143,12 @@ public class KeyboardRgbService : BackgroundService
 
                 if (attempt < maxRetries)
                 {
-                    _logger.LogWarning(ex, "Failed to apply colors (attempt {Attempt}/{MaxRetries}). Retrying in 1 second...",
-                        attempt, maxRetries);
-                    await Task.Delay(1000);
+                    _logger.LogWarning(ex, "Failed to apply colors (attempt {Attempt}/{MaxRetries}). Retrying in {DelayMs}ms...",
+                        attempt, maxRetries, delayMs);
+                    await Task.Delay(delayMs);
+
+                    // Exponential backoff with cap at 8 seconds
+                    delayMs = Math.Min(delayMs * 2, 8000);
                 }
             }
         }
@@ -169,6 +177,7 @@ public class KeyboardRgbService : BackgroundService
 
     /// <summary>
     /// Sets up a file watcher to automatically reload config when it changes
+    /// Uses debouncing to handle multiple rapid file system events
     /// </summary>
     private void SetupConfigWatcher()
     {
@@ -185,21 +194,53 @@ public class KeyboardRgbService : BackgroundService
                 EnableRaisingEvents = true
             };
 
-            _configWatcher.Changed += async (sender, e) =>
-            {
-                _logger.LogInformation("Configuration file changed. Reloading...");
-
-                // Small delay to ensure file is fully written
-                await Task.Delay(500);
-
-                await ApplyConfigurationAsync();
-            };
+            _configWatcher.Changed += OnConfigFileChanged;
 
             _logger.LogInformation("File watcher enabled for config.json");
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to set up config file watcher. Changes will not be auto-detected.");
+        }
+    }
+
+    /// <summary>
+    /// Handles config file change events with debouncing
+    /// FileSystemWatcher often fires multiple events for a single change
+    /// </summary>
+    private void OnConfigFileChanged(object sender, FileSystemEventArgs e)
+    {
+        lock (_configChangeLock)
+        {
+            // Cancel any pending config reload
+            _configChangeCts?.Cancel();
+            _configChangeCts?.Dispose();
+            _configChangeCts = new CancellationTokenSource();
+
+            var token = _configChangeCts.Token;
+
+            // Debounce: wait 500ms before actually reloading
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(500, token);
+
+                    if (!token.IsCancellationRequested)
+                    {
+                        _logger.LogInformation("Configuration file changed. Reloading...");
+                        await ApplyConfigurationAsync();
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Another change came in, this reload was cancelled
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error reloading configuration after file change");
+                }
+            }, token);
         }
     }
 
@@ -267,6 +308,8 @@ public class KeyboardRgbService : BackgroundService
 
     public override void Dispose()
     {
+        _configChangeCts?.Cancel();
+        _configChangeCts?.Dispose();
         _configWatcher?.Dispose();
         _platformService.ColorReapplyRequested -= OnColorReapplyRequested;
         _platformService.Dispose();

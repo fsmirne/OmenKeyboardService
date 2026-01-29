@@ -296,10 +296,11 @@ public class OmenKeyboardController
             ["pkeys"] = new List<string> { "p1", "p2", "p3", "p4", "p5" },
             ["fkeys"] = new List<string> { "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12" },
             ["media"] = new List<string> { "play", "stop", "playlast", "playnext" },
-            ["system"] = new List<string> { "prtscrn", "sclock", "pause", "insert", "home", "insert", "pgup", "delete", "end", "pgdown" },
+            ["system"] = new List<string> { "prtscrn", "sclock", "pause", "insert", "home", "pgup", "del", "delete", "end", "pgdown" },
             ["arrows"] = new List<string> { "leftarrow", "rightarrow", "uparrow", "downarrow" },
             ["numpad"] = new List<string> { "numlock", "numpad/", "numpad*", "numpad-", "numpad7", "numpad8", "numpad9", "numpad+", "numpad4", "numpad5", "numpad6", "numpad1", "numpad2", "numpad3", "numpad0", "numpad.", "numpadenter" },
-            ["fps"] = new List<string> { "w", "a", "s", "d" }
+            ["fps"] = new List<string> { "w", "a", "s", "d" },
+            ["windows"] = new List<string> { "windows" }
         };
     }
 }
