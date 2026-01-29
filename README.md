@@ -12,7 +12,7 @@ A cross-platform service that automatically controls the RGB LED colors on HP Om
 - **Cross-Platform**: Single codebase works on both Windows and Linux
 - **USB Reconnection**: Automatically detects keyboard reconnection and restores colors when using KVM switches or replug events
 - **Platform-Specific Features**:
-  - **Windows**: Power management (sleep/wake), session lock/unlock detection, WMI device monitoring
+  - **Windows**: Power management (sleep/wake), session lock/unlock detection, display power monitoring, user presence detection, WMI device monitoring
   - **Linux**: Device monitoring via /dev filesystem watching
 - **JSON Configuration**: Easy-to-edit configuration file for color profiles
 - **Hot Reload**: Automatically detects config file changes and applies new colors
@@ -446,6 +446,22 @@ If colors don't restore after unlocking:
 2. **Verify service is running**: The service must run under LocalSystem or an account with session monitoring permissions
 3. **Manual trigger**: Edit and save `config.json` to manually reapply colors
 
+#### Windows: Colors Reset After Screen Turns Off (No Sleep)
+
+The service monitors user presence detection and display power state changes. When your screen turns off due to inactivity but the computer doesn't sleep, the service automatically restores colors when you return and wake the display.
+
+This feature handles scenarios where:
+- Screen timeout occurs (user idle/away)
+- User returns and moves mouse or presses a key
+- Display powers back on
+
+If colors don't restore when returning from screen timeout:
+
+1. **Check Event Viewer**: Look for "User presence detected (returned from idle)" or "Display powered ON" messages
+2. **Verify service is running**: Check `services.msc`
+3. **Check power settings**: Ensure Windows is configured to turn off the display after inactivity (Settings → System → Power & sleep)
+4. **Manual trigger**: Edit and save `config.json` to manually reapply colors
+
 ### KVM Switch / USB Reconnection (All Platforms)
 
 The service automatically detects keyboard reconnection and restores colors. This works for:
@@ -509,7 +525,7 @@ The service uses a cross-platform architecture with platform-specific implementa
 
 - **Common Code**: `KeyboardRgbService`, `OmenKeyboardController`, HID communication
 - **Platform Abstraction**: `IPlatformService` interface
-- **Windows Implementation**: `WindowsPlatformService` - WMI device monitoring, power events, session events
+- **Windows Implementation**: `WindowsPlatformService` - WMI device monitoring, power events (sleep/wake), session events (lock/unlock/logon), display power notifications, user presence detection
 - **Linux Implementation**: `LinuxPlatformService` - /dev filesystem monitoring for device changes
 
 ### How It Works
@@ -521,7 +537,7 @@ The service uses a cross-platform architecture with platform-specific implementa
 5. Sends RGB color commands to keyboard firmware
 6. Monitors config file for changes and reloads automatically
 7. Monitors platform-specific events:
-   - **Windows**: Power events (sleep/wake), session events (lock/unlock), WMI USB device arrival
+   - **Windows**: Power events (sleep/wake), session events (lock/unlock), display power state changes, user presence detection (idle/active), WMI USB device arrival
    - **Linux**: /dev/hidraw* device creation events
 8. Automatically restores colors when keyboard reconnects (KVM switches, USB replug, etc.)
 
@@ -593,7 +609,7 @@ Look for these messages in the logs (both platforms):
 - `Applying profile: [ProfileName]` - Loading configuration
 - `Successfully applied colors to keyboard. Groups configured: X` - Colors applied
 - Platform-specific events:
-  - Windows: `System resumed from sleep`, `Session unlocked`, `HP Omen keyboard reconnected (KVM switch or USB replug detected)`
+  - Windows: `System resumed from sleep`, `Session unlocked`, `Display powered ON`, `User presence detected (returned from idle)`, `HP Omen keyboard reconnected (KVM switch or USB replug detected)`
   - Linux: `New HID device detected`
 - `Successfully applied colors on attempt X` - Colors applied after retry
 - `Failed to apply colors after X attempts` - All retries exhausted

@@ -262,6 +262,7 @@ public class WindowsPlatformService : IPlatformService
         // Display power state GUIDs
         private static readonly Guid GUID_CONSOLE_DISPLAY_STATE = new Guid("6fe69556-704a-47a0-8f24-c28d936fda47");
         private static readonly Guid GUID_MONITOR_POWER_ON = new Guid("02731015-4510-4526-99e6-e5a17ebd1aea");
+        private static readonly Guid GUID_SESSION_USER_PRESENCE = new Guid("3c0f4548-c03f-4c4d-b9f2-237ede686376");
 
         private readonly ILogger _logger;
         private readonly Action<SessionChangeReason> _onSessionChange;
@@ -270,6 +271,7 @@ public class WindowsPlatformService : IPlatformService
         private WndProcDelegate? _wndProcDelegate;
         private IntPtr _displayPowerNotifyHandle;
         private IntPtr _monitorPowerNotifyHandle;
+        private IntPtr _userPresenceNotifyHandle;
 
         [DllImport("wtsapi32.dll", SetLastError = true)]
         private static extern bool WTSRegisterSessionNotification(IntPtr hWnd, int dwFlags);
@@ -408,6 +410,19 @@ public class WindowsPlatformService : IPlatformService
                     {
                         _logger.LogInformation("Registered for monitor power notifications");
                     }
+
+                    // Register for user presence notifications (detects user activity after idle/away)
+                    var userPresenceGuid = GUID_SESSION_USER_PRESENCE;
+                    _userPresenceNotifyHandle = RegisterPowerSettingNotification(_hwnd, ref userPresenceGuid, 0);
+                    if (_userPresenceNotifyHandle == IntPtr.Zero)
+                    {
+                        int error = Marshal.GetLastWin32Error();
+                        _logger.LogWarning("Failed to register for user presence notifications (error: {Error})", error);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Registered for user presence notifications");
+                    }
                 }
 
                 _logger.LogInformation("Win32 session notification window registered successfully");
@@ -454,6 +469,20 @@ public class WindowsPlatformService : IPlatformService
                             _logger.LogDebug("Display power state changed to: {State}", setting.Data);
                         }
                     }
+                    // Check if this is a user presence event
+                    else if (setting.PowerSetting == GUID_SESSION_USER_PRESENCE)
+                    {
+                        // Data field: 0 = user absent/away, 2 = user present/active
+                        if (setting.Data == 2)
+                        {
+                            _logger.LogInformation("User presence detected (returned from idle). Requesting color reapplication...");
+                            _onDisplayPowerChange?.Invoke();
+                        }
+                        else
+                        {
+                            _logger.LogDebug("User presence state changed to: {State}", setting.Data);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -477,6 +506,12 @@ public class WindowsPlatformService : IPlatformService
             {
                 UnregisterPowerSettingNotification(_monitorPowerNotifyHandle);
                 _monitorPowerNotifyHandle = IntPtr.Zero;
+            }
+
+            if (_userPresenceNotifyHandle != IntPtr.Zero)
+            {
+                UnregisterPowerSettingNotification(_userPresenceNotifyHandle);
+                _userPresenceNotifyHandle = IntPtr.Zero;
             }
 
             if (_hwnd != IntPtr.Zero)
