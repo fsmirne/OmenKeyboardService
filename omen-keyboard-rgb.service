@@ -10,6 +10,7 @@ ExecStart=/usr/local/bin/omen-keyboard-rgb/OmenKeyboardService
 WorkingDirectory=/usr/local/bin/omen-keyboard-rgb
 Restart=on-failure
 RestartSec=5s
+LogLevelMax=warning
 
 # Run as root to access HID devices
 User=root
