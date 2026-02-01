@@ -36,12 +36,12 @@ public class WindowsPlatformService : IPlatformService
         _logger = logger;
     }
 
-    public void Initialize()
+    public void Initialize(string? hotkey = null)
     {
         _logger.LogInformation("Initializing Windows platform services...");
 
-        // Set up power management monitoring
-        SetupPowerManagement();
+        // Set up power management monitoring (pass hotkey for global hotkey registration)
+        SetupPowerManagement(hotkey);
 
         // Set up device monitoring
         SetupDeviceMonitoring();
@@ -52,14 +52,15 @@ public class WindowsPlatformService : IPlatformService
     /// <summary>
     /// Sets up power management event monitoring to restore colors after sleep/wake
     /// </summary>
-    private void SetupPowerManagement()
+    /// <param name="hotkey">Optional global hotkey for manual color reapplication</param>
+    private void SetupPowerManagement(string? hotkey)
     {
         try
         {
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
             // Use Win32 API for session notifications (more reliable for services)
-            _sessionWindow = new SessionNotificationWindow(_logger, OnSessionChange, OnDisplayPowerChange);
+            _sessionWindow = new SessionNotificationWindow(_logger, OnSessionChange, OnDisplayPowerChange, hotkey);
             _sessionWindow.Initialize();
 
             _logger.LogInformation("Power management and session monitoring enabled");
@@ -256,8 +257,17 @@ public class WindowsPlatformService : IPlatformService
     {
         private const int WM_WTSSESSION_CHANGE = 0x02B1;
         private const int WM_POWERBROADCAST = 0x0218;
+        private const int WM_HOTKEY = 0x0312;
         private const int PBT_POWERSETTINGCHANGE = 0x8013;
         private const int NOTIFY_FOR_ALL_SESSIONS = 1;
+        private const int HOTKEY_ID = 1; // Arbitrary ID for our hotkey
+
+        // Hotkey modifiers
+        private const uint MOD_ALT = 0x0001;
+        private const uint MOD_CONTROL = 0x0002;
+        private const uint MOD_SHIFT = 0x0004;
+        private const uint MOD_WIN = 0x0008;
+        private const uint MOD_NOREPEAT = 0x4000; // Don't repeat if key is held down
 
         // Display power state GUIDs
         private static readonly Guid GUID_CONSOLE_DISPLAY_STATE = new Guid("6fe69556-704a-47a0-8f24-c28d936fda47");
@@ -267,11 +277,13 @@ public class WindowsPlatformService : IPlatformService
         private readonly ILogger _logger;
         private readonly Action<SessionChangeReason> _onSessionChange;
         private readonly Action? _onDisplayPowerChange;
+        private readonly string? _hotkey;
         private IntPtr _hwnd;
         private WndProcDelegate? _wndProcDelegate;
         private IntPtr _displayPowerNotifyHandle;
         private IntPtr _monitorPowerNotifyHandle;
         private IntPtr _userPresenceNotifyHandle;
+        private bool _hotkeyRegistered;
 
         [DllImport("wtsapi32.dll", SetLastError = true)]
         private static extern bool WTSRegisterSessionNotification(IntPtr hWnd, int dwFlags);
@@ -306,6 +318,12 @@ public class WindowsPlatformService : IPlatformService
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool UnregisterPowerSettingNotification(IntPtr Handle);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct WNDCLASSEX
         {
@@ -333,11 +351,12 @@ public class WindowsPlatformService : IPlatformService
 
         private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
-        public SessionNotificationWindow(ILogger logger, Action<SessionChangeReason> onSessionChange, Action? onDisplayPowerChange = null)
+        public SessionNotificationWindow(ILogger logger, Action<SessionChangeReason> onSessionChange, Action? onDisplayPowerChange = null, string? hotkey = null)
         {
             _logger = logger;
             _onSessionChange = onSessionChange;
             _onDisplayPowerChange = onDisplayPowerChange;
+            _hotkey = hotkey;
         }
 
         public void Initialize()
@@ -412,17 +431,33 @@ public class WindowsPlatformService : IPlatformService
                     }
 
                     // Register for user presence notifications (detects user activity after idle/away)
+                    // Note: This GUID may not be supported on all Windows versions or hardware
                     var userPresenceGuid = GUID_SESSION_USER_PRESENCE;
                     _userPresenceNotifyHandle = RegisterPowerSettingNotification(_hwnd, ref userPresenceGuid, 0);
                     if (_userPresenceNotifyHandle == IntPtr.Zero)
                     {
                         int error = Marshal.GetLastWin32Error();
-                        _logger.LogWarning("Failed to register for user presence notifications (error: {Error})", error);
+                        // Error 87 (ERROR_INVALID_PARAMETER) means this GUID is not supported on this system
+                        // This is non-critical, as we have other events (display power, session unlock, etc.)
+                        if (error == 87)
+                        {
+                            _logger.LogDebug("User presence notifications not supported on this system (error 87). This is normal for some laptops/configurations.");
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Failed to register for user presence notifications (error: {Error})", error);
+                        }
                     }
                     else
                     {
                         _logger.LogInformation("Registered for user presence notifications");
                     }
+                }
+
+                // Register global hotkey if configured
+                if (!string.IsNullOrWhiteSpace(_hotkey))
+                {
+                    RegisterGlobalHotkey(_hotkey);
                 }
 
                 _logger.LogInformation("Win32 session notification window registered successfully");
@@ -431,6 +466,133 @@ public class WindowsPlatformService : IPlatformService
             {
                 _logger.LogWarning(ex, "Failed to initialize session notification window");
             }
+        }
+
+        /// <summary>
+        /// Registers a global hotkey for manual color reapplication
+        /// </summary>
+        /// <param name="hotkeyStr">Hotkey string (e.g., "Ctrl+Alt+R")</param>
+        private void RegisterGlobalHotkey(string hotkeyStr)
+        {
+            try
+            {
+                // Parse hotkey string
+                var (modifiers, virtualKey) = ParseHotkey(hotkeyStr);
+
+                // Add MOD_NOREPEAT to prevent repeated triggers when holding the key
+                modifiers |= MOD_NOREPEAT;
+
+                // Register the hotkey
+                if (RegisterHotKey(_hwnd, HOTKEY_ID, modifiers, virtualKey))
+                {
+                    _hotkeyRegistered = true;
+                    _logger.LogInformation("Registered global hotkey: {Hotkey}", hotkeyStr);
+                }
+                else
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    _logger.LogWarning("Failed to register global hotkey '{Hotkey}' (error: {Error}). It may already be in use by another application.", hotkeyStr, error);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse or register hotkey: {Hotkey}", hotkeyStr);
+            }
+        }
+
+        /// <summary>
+        /// Parses a hotkey string into modifiers and virtual key code
+        /// Format: "Modifier+Key" (e.g., "Ctrl+Alt+R", "Ctrl+Shift+F12")
+        /// </summary>
+        private (uint modifiers, uint virtualKey) ParseHotkey(string hotkeyStr)
+        {
+            uint modifiers = 0;
+            uint virtualKey = 0;
+
+            var parts = hotkeyStr.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            foreach (var part in parts)
+            {
+                var partUpper = part.ToUpperInvariant();
+
+                // Check for modifiers
+                if (partUpper == "CTRL" || partUpper == "CONTROL")
+                {
+                    modifiers |= MOD_CONTROL;
+                }
+                else if (partUpper == "ALT")
+                {
+                    modifiers |= MOD_ALT;
+                }
+                else if (partUpper == "SHIFT")
+                {
+                    modifiers |= MOD_SHIFT;
+                }
+                else if (partUpper == "WIN" || partUpper == "WINDOWS")
+                {
+                    modifiers |= MOD_WIN;
+                }
+                else
+                {
+                    // This should be the key itself
+                    virtualKey = GetVirtualKeyCode(partUpper);
+                }
+            }
+
+            if (virtualKey == 0)
+            {
+                throw new ArgumentException($"Invalid hotkey format: {hotkeyStr}. No key specified.");
+            }
+
+            return (modifiers, virtualKey);
+        }
+
+        /// <summary>
+        /// Converts a key name to a virtual key code
+        /// </summary>
+        private uint GetVirtualKeyCode(string keyName)
+        {
+            // Function keys
+            if (keyName.StartsWith("F") && int.TryParse(keyName.Substring(1), out int fKeyNum) && fKeyNum >= 1 && fKeyNum <= 24)
+            {
+                return (uint)(0x70 + fKeyNum - 1); // VK_F1 = 0x70
+            }
+
+            // Number keys (top row)
+            if (keyName.Length == 1 && char.IsDigit(keyName[0]))
+            {
+                return (uint)keyName[0]; // '0' = 0x30, '1' = 0x31, etc.
+            }
+
+            // Letter keys
+            if (keyName.Length == 1 && char.IsLetter(keyName[0]))
+            {
+                return (uint)keyName[0]; // 'A' = 0x41, 'B' = 0x42, etc.
+            }
+
+            // Special keys
+            return keyName switch
+            {
+                "SPACE" => 0x20,
+                "ENTER" => 0x0D,
+                "ESC" => 0x1B,
+                "TAB" => 0x09,
+                "BACKSPACE" => 0x08,
+                "DELETE" => 0x2E,
+                "INSERT" => 0x2D,
+                "HOME" => 0x24,
+                "END" => 0x23,
+                "PAGEUP" => 0x21,
+                "PAGEDOWN" => 0x22,
+                "LEFT" => 0x25,
+                "UP" => 0x26,
+                "RIGHT" => 0x27,
+                "DOWN" => 0x28,
+                "PRINTSCREEN" => 0x2C,
+                "SCROLLLOCK" => 0x91,
+                "PAUSE" => 0x13,
+                _ => throw new ArgumentException($"Unknown key: {keyName}")
+            };
         }
 
         private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
@@ -445,6 +607,18 @@ public class WindowsPlatformService : IPlatformService
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error processing session change notification");
+                }
+            }
+            else if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID)
+            {
+                try
+                {
+                    _logger.LogInformation("Global hotkey pressed. Requesting color reapplication...");
+                    _onDisplayPowerChange?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing hotkey");
                 }
             }
             else if (msg == WM_POWERBROADCAST && wParam.ToInt32() == PBT_POWERSETTINGCHANGE)
@@ -495,6 +669,13 @@ public class WindowsPlatformService : IPlatformService
 
         public void Dispose()
         {
+            // Unregister hotkey
+            if (_hotkeyRegistered && _hwnd != IntPtr.Zero)
+            {
+                UnregisterHotKey(_hwnd, HOTKEY_ID);
+                _hotkeyRegistered = false;
+            }
+
             // Unregister power notifications
             if (_displayPowerNotifyHandle != IntPtr.Zero)
             {

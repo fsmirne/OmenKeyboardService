@@ -1,6 +1,9 @@
 {
   "profileName": "Gaming",
-  "logLevel": "Warning",
+  "logLevel": "Information",
+  "hotkey": "Ctrl+Alt+K",
+  "refreshIntervalSeconds": 300,
+  "kvmMode": true,
   "profile": {
     "fps": "FF0000",
     "arrows": "FF0000",
@@ -9,6 +12,6 @@
     "media": "FFFF00",
     "numpad": "00FFFF",
     "windows": "FF6600",
-	"esc": "FF6600"
+    "esc": "FF6600"
   }
 }

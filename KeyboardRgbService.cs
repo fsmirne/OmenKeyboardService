@@ -15,10 +15,14 @@ public class KeyboardRgbService : BackgroundService
     private readonly IPlatformService _platformService;
     private readonly string _configPath;
     private FileSystemWatcher? _configWatcher;
+    private KeyboardConfig? _currentConfig;
 
     // Debouncing for config file changes
     private CancellationTokenSource? _configChangeCts;
     private readonly object _configChangeLock = new object();
+
+    // Periodic refresh timer for KVM mode
+    private Timer? _refreshTimer;
 
     public KeyboardRgbService(
         ILogger<KeyboardRgbService> logger,
@@ -47,7 +51,10 @@ public class KeyboardRgbService : BackgroundService
 
             // Initialize platform-specific services (power events, device monitoring, etc.)
             _platformService.ColorReapplyRequested += OnColorReapplyRequested;
-            _platformService.Initialize();
+            _platformService.Initialize(_currentConfig?.Hotkey);
+
+            // Set up periodic refresh if configured
+            SetupPeriodicRefresh();
 
             _logger.LogInformation("Service started successfully. Monitoring for config changes and platform events...");
 
@@ -92,6 +99,9 @@ public class KeyboardRgbService : BackgroundService
                 return;
             }
 
+            // Store current config for later reference
+            _currentConfig = config;
+
             _logger.LogInformation("Applying profile: {ProfileName}", config.ProfileName ?? "Custom");
 
             // Convert hex color strings to uint values
@@ -120,7 +130,11 @@ public class KeyboardRgbService : BackgroundService
     {
         int attempt = 0;
         Exception? lastException = null;
-        int delayMs = 500; // Start with 500ms, then 1s, 2s, 4s, etc.
+
+        // In KVM mode, use longer initial delay and higher cap for retry intervals
+        bool kvmMode = _currentConfig?.KvmMode ?? false;
+        int delayMs = kvmMode ? 1000 : 500; // KVM: start with 1s, normal: 500ms
+        int maxDelayMs = kvmMode ? 30000 : 8000; // KVM: cap at 30s, normal: 8s
 
         while (attempt < maxRetries)
         {
@@ -132,7 +146,8 @@ public class KeyboardRgbService : BackgroundService
                 // Success - log only if we had to retry
                 if (attempt > 1)
                 {
-                    _logger.LogInformation("Successfully applied colors on attempt {Attempt}", attempt);
+                    _logger.LogInformation("Successfully applied colors on attempt {Attempt}{KvmNote}",
+                        attempt, kvmMode ? " (KVM mode)" : "");
                 }
 
                 return; // Success, exit the retry loop
@@ -143,18 +158,27 @@ public class KeyboardRgbService : BackgroundService
 
                 if (attempt < maxRetries)
                 {
-                    _logger.LogWarning(ex, "Failed to apply colors (attempt {Attempt}/{MaxRetries}). Retrying in {DelayMs}ms...",
-                        attempt, maxRetries, delayMs);
+                    string kvmNote = kvmMode ? " (KVM mode - keyboard may be switched to another computer)" : "";
+                    _logger.LogWarning(ex, "Failed to apply colors (attempt {Attempt}/{MaxRetries}). Retrying in {DelayMs}ms...{KvmNote}",
+                        attempt, maxRetries, delayMs, kvmNote);
                     await Task.Delay(delayMs);
 
-                    // Exponential backoff with cap at 8 seconds
-                    delayMs = Math.Min(delayMs * 2, 8000);
+                    // Exponential backoff with cap
+                    delayMs = Math.Min(delayMs * 2, maxDelayMs);
                 }
             }
         }
 
         // All retries failed
-        _logger.LogError(lastException, "Failed to apply colors after {MaxRetries} attempts. Keyboard may not be ready or connected.", maxRetries);
+        if (kvmMode)
+        {
+            _logger.LogWarning(lastException, "Failed to apply colors after {MaxRetries} attempts (KVM mode). " +
+                "Keyboard may be switched to another computer. Will retry when keyboard reconnects or on next trigger.", maxRetries);
+        }
+        else
+        {
+            _logger.LogError(lastException, "Failed to apply colors after {MaxRetries} attempts. Keyboard may not be ready or connected.", maxRetries);
+        }
     }
 
     /// <summary>
@@ -246,6 +270,36 @@ public class KeyboardRgbService : BackgroundService
 
 
     /// <summary>
+    /// Sets up periodic color refresh if configured
+    /// Useful for KVM setups where display power events don't fire reliably
+    /// </summary>
+    private void SetupPeriodicRefresh()
+    {
+        if (_currentConfig?.RefreshIntervalSeconds > 0)
+        {
+            var intervalMs = _currentConfig.RefreshIntervalSeconds.Value * 1000;
+            _logger.LogInformation("Periodic refresh enabled: colors will be reapplied every {Seconds} seconds", _currentConfig.RefreshIntervalSeconds.Value);
+
+            _refreshTimer = new Timer(
+                async _ =>
+                {
+                    try
+                    {
+                        _logger.LogDebug("Periodic refresh triggered");
+                        await ApplyConfigurationAsync(retryCount: 3);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error during periodic refresh");
+                    }
+                },
+                null,
+                intervalMs,
+                intervalMs);
+        }
+    }
+
+    /// <summary>
     /// Handles color reapply requests from the platform service
     /// </summary>
     private async void OnColorReapplyRequested(object? sender, ColorReapplyEventArgs e)
@@ -259,10 +313,14 @@ public class KeyboardRgbService : BackgroundService
 
             _logger.LogInformation("Attempting to reapply keyboard colors...");
 
+            // In KVM mode, use more retries (keyboard might be switched away temporarily)
+            bool kvmMode = _currentConfig?.KvmMode ?? false;
+            int retryCount = kvmMode ? Math.Max(e.RetryCount, 10) : e.RetryCount;
+
             // Try to apply configuration - if keyboard is not present, this will fail gracefully
             try
             {
-                await ApplyConfigurationAsync(retryCount: e.RetryCount);
+                await ApplyConfigurationAsync(retryCount: retryCount);
             }
             catch (Exception ex)
             {
@@ -285,6 +343,9 @@ public class KeyboardRgbService : BackgroundService
         {
             ProfileName = "Gaming",
             LogLevel = "Warning",
+            Hotkey = null,  // Optional: e.g., "Ctrl+Alt+R" to manually reapply colors
+            RefreshIntervalSeconds = null,  // Optional: e.g., 300 for periodic refresh every 5 minutes
+            KvmMode = false,  // Optional: set to true for more aggressive retry logic in KVM setups
             Profile = new Dictionary<string, string>
             {
                 ["fps"] = "FF0000",        // WASD keys - Red
@@ -311,6 +372,7 @@ public class KeyboardRgbService : BackgroundService
         _configChangeCts?.Cancel();
         _configChangeCts?.Dispose();
         _configWatcher?.Dispose();
+        _refreshTimer?.Dispose();
         _platformService.ColorReapplyRequested -= OnColorReapplyRequested;
         _platformService.Dispose();
         base.Dispose();
@@ -342,4 +404,27 @@ public class KeyboardConfig
     /// Set to "Information" to enable detailed logging for debugging
     /// </summary>
     public string? LogLevel { get; set; }
+
+    /// <summary>
+    /// Global hotkey to manually trigger color reapplication
+    /// Format: "Modifier+Key" (e.g., "Ctrl+Alt+R", "Ctrl+Shift+K", "Alt+F12")
+    /// Valid modifiers: Ctrl, Alt, Shift, Win (can combine with +)
+    /// If not specified or empty, no hotkey will be registered
+    /// </summary>
+    public string? Hotkey { get; set; }
+
+    /// <summary>
+    /// Interval in seconds for periodic color refresh (useful for KVM setups)
+    /// If specified and greater than 0, colors will be automatically reapplied every N seconds
+    /// This helps when display power events don't fire reliably (e.g., laptop with KVM)
+    /// Recommended value: 300 (5 minutes) for KVM setups
+    /// </summary>
+    public int? RefreshIntervalSeconds { get; set; }
+
+    /// <summary>
+    /// Enable KVM mode for more aggressive retry logic
+    /// When enabled, the service will use longer delays and more retries
+    /// when the keyboard is not accessible (e.g., switched to another computer)
+    /// </summary>
+    public bool? KvmMode { get; set; }
 }

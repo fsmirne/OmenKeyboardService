@@ -33,9 +33,15 @@ public class LinuxPlatformService : IPlatformService
         _logger = logger;
     }
 
-    public void Initialize()
+    public void Initialize(string? hotkey = null)
     {
         _logger.LogInformation("Initializing Linux platform services...");
+
+        // Note: Global hotkey support is not implemented for Linux yet
+        if (!string.IsNullOrWhiteSpace(hotkey))
+        {
+            _logger.LogWarning("Global hotkey '{Hotkey}' configured, but hotkey support is not yet implemented on Linux", hotkey);
+        }
 
         // Set up device monitoring
         SetupDeviceMonitoring();
