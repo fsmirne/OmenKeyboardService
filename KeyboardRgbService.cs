@@ -1,6 +1,4 @@
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System.Text.Json;
+using System.Threading.Channels;
 
 namespace OmenKeyboardService;
 
@@ -13,6 +11,7 @@ public class KeyboardRgbService : BackgroundService
     private readonly ILogger<KeyboardRgbService> _logger;
     private readonly OmenKeyboardController _keyboardController;
     private readonly IPlatformService _platformService;
+    private readonly KeyboardConfigProvider _configProvider;
     private readonly string _configPath;
     private FileSystemWatcher? _configWatcher;
     private KeyboardConfig? _currentConfig;
@@ -21,24 +20,33 @@ public class KeyboardRgbService : BackgroundService
     private CancellationTokenSource? _configChangeCts;
     private readonly object _configChangeLock = new object();
 
-    // Periodic refresh timer for KVM mode
-    private Timer? _refreshTimer;
+    private PeriodicTimer? _periodicTimer;
+    
+
+    private readonly Channel<ColorReapplyEventArgs> _reapplyChannel = Channel.CreateUnbounded<ColorReapplyEventArgs>();
+    private Task? _reapplyWorkerTask;
+
+    private CancellationTokenSource? _serviceCts;
 
     public KeyboardRgbService(
         ILogger<KeyboardRgbService> logger,
         OmenKeyboardController keyboardController,
-        IPlatformService platformService)
+        IPlatformService platformService,
+        KeyboardConfigProvider configProvider)
     {
         _logger = logger;
         _keyboardController = keyboardController;
         _platformService = platformService;
+        _configProvider = configProvider;
 
         // Config file should be in the same directory as the executable
-        _configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
+        _configPath = _configProvider.ConfigPath;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _serviceCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+
         _logger.LogInformation("HP Omen Keyboard RGB Service starting on {Platform}...", _platformService.PlatformName);
 
         try
@@ -55,6 +63,8 @@ public class KeyboardRgbService : BackgroundService
 
             // Set up periodic refresh if configured
             SetupPeriodicRefresh();
+
+            _reapplyWorkerTask = RunReapplyWorkerAsync(stoppingToken);
 
             _logger.LogInformation("Service started successfully. Monitoring for config changes and platform events...");
 
@@ -76,21 +86,10 @@ public class KeyboardRgbService : BackgroundService
     {
         try
         {
-            if (!File.Exists(_configPath))
-            {
-                _logger.LogWarning("Config file not found at {ConfigPath}. Creating default config.", _configPath);
-                CreateDefaultConfig();
-            }
-
             _logger.LogInformation("Reading configuration from {ConfigPath}", _configPath);
 
             // Read and parse the configuration file
-            var json = await File.ReadAllTextAsync(_configPath);
-            var config = JsonSerializer.Deserialize<KeyboardConfig>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true,
-                ReadCommentHandling = JsonCommentHandling.Skip
-            });
+            var config = await _configProvider.LoadOrCreateDefaultAsync();
 
             if (config == null || config.Profile == null)
             {
@@ -280,151 +279,89 @@ public class KeyboardRgbService : BackgroundService
             var intervalMs = _currentConfig.RefreshIntervalSeconds.Value * 1000;
             _logger.LogInformation("Periodic refresh enabled: colors will be reapplied every {Seconds} seconds", _currentConfig.RefreshIntervalSeconds.Value);
 
-            _refreshTimer = new Timer(
-                async _ =>
+            _periodicTimer?.Dispose();
+            _periodicTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(intervalMs));
+
+            _ = Task.Run(async () =>
+            {
+                try
                 {
-                    try
+                    if (_serviceCts == null)
+                        return;
+
+                    while (await _periodicTimer.WaitForNextTickAsync(_serviceCts.Token))
                     {
-                        _logger.LogDebug("Periodic refresh triggered");
-                        await ApplyConfigurationAsync(retryCount: 3);
+                        try
+                        {
+                            _logger.LogDebug("Periodic refresh triggered");
+                            await ApplyConfigurationAsync(retryCount: 3);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Error during periodic refresh");
+                        }
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Error during periodic refresh");
-                    }
-                },
-                null,
-                intervalMs,
-                intervalMs);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            });
         }
     }
 
     /// <summary>
     /// Handles color reapply requests from the platform service
     /// </summary>
-    private async void OnColorReapplyRequested(object? sender, ColorReapplyEventArgs e)
+    private void OnColorReapplyRequested(object? sender, ColorReapplyEventArgs e)
     {
-        try
+        _reapplyChannel.Writer.TryWrite(e);
+    }
+
+    private async Task RunReapplyWorkerAsync(CancellationToken stoppingToken)
+    {
+        await foreach (var e in _reapplyChannel.Reader.ReadAllAsync(stoppingToken))
         {
-            _logger.LogInformation("{Reason}. Waiting {DelayMs}ms for device initialization...", e.Reason, e.DelayMs);
-
-            // Delay to allow device to fully initialize
-            await Task.Delay(e.DelayMs);
-
-            _logger.LogInformation("Attempting to reapply keyboard colors...");
-
-            // In KVM mode, use more retries (keyboard might be switched away temporarily)
-            bool kvmMode = _currentConfig?.KvmMode ?? false;
-            int retryCount = kvmMode ? Math.Max(e.RetryCount, 10) : e.RetryCount;
-
-            // Try to apply configuration - if keyboard is not present, this will fail gracefully
             try
             {
-                await ApplyConfigurationAsync(retryCount: retryCount);
+                _logger.LogInformation("{Reason}. Waiting {DelayMs}ms for device initialization...", e.Reason, e.DelayMs);
+                await Task.Delay(e.DelayMs, stoppingToken);
+
+                _logger.LogInformation("Attempting to reapply keyboard colors...");
+
+                bool kvmMode = _currentConfig?.KvmMode ?? false;
+                int retryCount = kvmMode ? Math.Max(e.RetryCount, 10) : e.RetryCount;
+
+                try
+                {
+                    await ApplyConfigurationAsync(retryCount: retryCount);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to reapply colors. Device may not be ready or connected.");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
             catch (Exception ex)
             {
-                // Log but don't crash - device might not be ready or not our keyboard
-                _logger.LogWarning(ex, "Failed to reapply colors. Device may not be ready or connected.");
+                _logger.LogError(ex, "Error handling color reapply request");
             }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error handling color reapply request");
-        }
-    }
-
-    /// <summary>
-    /// Creates a default configuration file with example profiles
-    /// </summary>
-    private void CreateDefaultConfig()
-    {
-        var defaultConfig = new KeyboardConfig
-        {
-            ProfileName = "Gaming",
-            LogLevel = "Warning",
-            Hotkey = null,  // Optional: e.g., "Ctrl+Alt+R" to manually reapply colors
-            RefreshIntervalSeconds = null,  // Optional: e.g., 300 for periodic refresh every 5 minutes
-            KvmMode = false,  // Optional: set to true for more aggressive retry logic in KVM setups
-            Profile = new Dictionary<string, string>
-            {
-                ["fps"] = "FF0000",        // WASD keys - Red
-                ["arrows"] = "00FF00",     // Arrow keys - Green
-                ["fkeys"] = "0000FF",      // Function keys - Blue
-                ["pkeys"] = "FF00FF",      // P1-P5 keys - Magenta
-                ["media"] = "FFFF00",      // Media keys - Yellow
-                ["numpad"] = "00FFFF",     // Numpad - Cyan
-                ["windows"] = "FF6600"     // Windows key - Orange
-            }
-        };
-
-        var json = JsonSerializer.Serialize(defaultConfig, new JsonSerializerOptions
-        {
-            WriteIndented = true
-        });
-
-        File.WriteAllText(_configPath, json);
-        _logger.LogInformation("Created default configuration file");
     }
 
     public override void Dispose()
     {
+        _serviceCts?.Cancel();
+        _serviceCts?.Dispose();
         _configChangeCts?.Cancel();
         _configChangeCts?.Dispose();
         _configWatcher?.Dispose();
-        _refreshTimer?.Dispose();
+        _periodicTimer?.Dispose();
         _platformService.ColorReapplyRequested -= OnColorReapplyRequested;
         _platformService.Dispose();
         base.Dispose();
+        GC.SuppressFinalize(this);
     }
-}
-
-/// <summary>
-/// Configuration model for the keyboard RGB settings
-/// </summary>
-public class KeyboardConfig
-{
-    /// <summary>
-    /// Name of the profile (for documentation purposes)
-    /// </summary>
-    public string? ProfileName { get; set; }
-
-    /// <summary>
-    /// Dictionary mapping key group names to hex color values
-    /// Valid groups: fps, arrows, fkeys, pkeys, media, numpad, system, windows
-    /// Individual keys can also be specified by name
-    /// Color format: "RRGGBB" (e.g., "FF0000" for red)
-    /// </summary>
-    public Dictionary<string, string> Profile { get; set; } = new();
-
-    /// <summary>
-    /// Minimum log level for the service
-    /// Valid values: "Trace", "Debug", "Information", "Warning", "Error", "Critical", "None"
-    /// Default: "Warning" (only warnings and errors will be logged)
-    /// Set to "Information" to enable detailed logging for debugging
-    /// </summary>
-    public string? LogLevel { get; set; }
-
-    /// <summary>
-    /// Global hotkey to manually trigger color reapplication
-    /// Format: "Modifier+Key" (e.g., "Ctrl+Alt+R", "Ctrl+Shift+K", "Alt+F12")
-    /// Valid modifiers: Ctrl, Alt, Shift, Win (can combine with +)
-    /// If not specified or empty, no hotkey will be registered
-    /// </summary>
-    public string? Hotkey { get; set; }
-
-    /// <summary>
-    /// Interval in seconds for periodic color refresh (useful for KVM setups)
-    /// If specified and greater than 0, colors will be automatically reapplied every N seconds
-    /// This helps when display power events don't fire reliably (e.g., laptop with KVM)
-    /// Recommended value: 300 (5 minutes) for KVM setups
-    /// </summary>
-    public int? RefreshIntervalSeconds { get; set; }
-
-    /// <summary>
-    /// Enable KVM mode for more aggressive retry logic
-    /// When enabled, the service will use longer delays and more retries
-    /// when the keyboard is not accessible (e.g., switched to another computer)
-    /// </summary>
-    public bool? KvmMode { get; set; }
 }

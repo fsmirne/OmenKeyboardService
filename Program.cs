@@ -1,9 +1,5 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using OmenKeyboardService;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 
 // Create a host builder that works on both Windows and Linux
 var builder = Host.CreateApplicationBuilder(args);
@@ -16,20 +12,11 @@ bool isLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 LogLevel minimumLogLevel = LogLevel.Warning; // Default to Warning
 try
 {
-    var configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
-    if (File.Exists(configPath))
+    var configProvider = new KeyboardConfigProvider();
+    var config = configProvider.LoadOrCreateDefault();
+    if (config.LogLevel != null && Enum.TryParse<LogLevel>(config.LogLevel, true, out var parsedLevel))
     {
-        var json = File.ReadAllText(configPath);
-        var config = JsonSerializer.Deserialize<KeyboardConfig>(json, new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            ReadCommentHandling = JsonCommentHandling.Skip
-        });
-
-        if (config?.LogLevel != null && Enum.TryParse<LogLevel>(config.LogLevel, true, out var parsedLevel))
-        {
-            minimumLogLevel = parsedLevel;
-        }
+        minimumLogLevel = parsedLevel;
     }
 }
 catch
@@ -104,6 +91,9 @@ builder.Services.AddHostedService<KeyboardRgbService>();
 
 // Register the keyboard controller as a singleton
 builder.Services.AddSingleton<OmenKeyboardController>();
+
+// Register config provider
+builder.Services.AddSingleton<KeyboardConfigProvider>();
 
 var host = builder.Build();
 await host.RunAsync();

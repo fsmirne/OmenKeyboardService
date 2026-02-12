@@ -1,5 +1,4 @@
 using HidSharp;
-using Microsoft.Extensions.Logging;
 
 namespace OmenKeyboardService;
 
@@ -35,8 +34,8 @@ public class OmenKeyboardController
     private const string BODY2 = "ffffff00ffff0000ffffffffffffffffffff0000ffff0000000000000000000000000000000000000000000000000000000000000000000000000000";
 
     // HP Omen keyboard USB identifiers
-    private const int VENDOR_ID = 0x03F0;  // HP
-    private const int PRODUCT_ID = 0x1F41; // Omen keyboard
+    private const int VENDOR_ID = OmenKeyboardConstants.VendorId;
+    private const int PRODUCT_ID = OmenKeyboardConstants.ProductId;
 
     public OmenKeyboardController(ILogger<OmenKeyboardController> logger)
     {
@@ -65,10 +64,12 @@ public class OmenKeyboardController
             // Open the keyboard device
             var device = OpenKeyboardDevice();
 
+            using var stream = device.Open();
+
             // Send each command to the keyboard
             foreach (var command in commandTable)
             {
-                WriteHidCommand(device, command.ToArray());
+                WriteHidCommand(device, stream, command.ToArray());
             }
 
             _logger.LogInformation("Colors applied successfully");
@@ -94,9 +95,7 @@ public class OmenKeyboardController
         if (!devices.Any())
         {
             _logger.LogWarning("HP Omen keyboard not found. Keyboard may not be connected or may still be initializing.");
-            throw new InvalidOperationException(
-                $"HP Omen keyboard not found (VID: 0x{VENDOR_ID:X4}, PID: 0x{PRODUCT_ID:X4}). " +
-                "Please ensure the keyboard is connected and initialized.");
+            throw new InvalidOperationException($"HP Omen keyboard not found (VID: 0x{VENDOR_ID:X4}, PID: 0x{PRODUCT_ID:X4}). Please ensure the keyboard is connected and initialized.");
         }
 
         // Select the device with the longest path (most specific interface)
@@ -109,10 +108,8 @@ public class OmenKeyboardController
     /// <summary>
     /// Writes a HID command to the keyboard device
     /// </summary>
-    private void WriteHidCommand(HidDevice device, byte[] command)
+    private static void WriteHidCommand(HidDevice device, HidStream stream, byte[] command)
     {
-        using var stream = device.Open();
-
         int maxSize = device.GetMaxOutputReportLength();
         if (maxSize <= 0)
         {
@@ -132,9 +129,7 @@ public class OmenKeyboardController
     /// <summary>
     /// Expands group names to individual key mappings
     /// </summary>
-    private Dictionary<string, uint> ExpandGroupsToKeys(
-        Dictionary<string, uint> colorOverrides,
-        Dictionary<string, List<string>> groups)
+    private static Dictionary<string, uint> ExpandGroupsToKeys(Dictionary<string, uint> colorOverrides, Dictionary<string, List<string>> groups)
     {
         return colorOverrides
             .SelectMany(kvp =>
@@ -147,7 +142,7 @@ public class OmenKeyboardController
                 // Otherwise, it's a single key
                 else
                 {
-                    return new[] { new { Key = kvp.Key, Color = kvp.Value } };
+                    return [new { Key = kvp.Key, Color = kvp.Value }];
                 }
             })
             .ToDictionary(x => x.Key, x => x.Color);
@@ -156,7 +151,7 @@ public class OmenKeyboardController
     /// <summary>
     /// Builds the HID command table with RGB color data for all keys
     /// </summary>
-    private List<List<byte>> BuildCommandTable(List<string> keys, Dictionary<string, uint> overrides)
+    private static List<List<byte>> BuildCommandTable(List<string> keys, Dictionary<string, uint> overrides)
     {
         // Define the 9 command line structures
         // Each tuple contains: (header, body template, bit offset for color component)
@@ -178,7 +173,7 @@ public class OmenKeyboardController
         // Start with the initialization header
         var result = new List<List<byte>>
         {
-            new List<byte>(DecodeHex(HEADER0))
+            new(DecodeHex(HEADER0))
         };
 
         // Build each of the 9 command lines
@@ -244,10 +239,10 @@ public class OmenKeyboardController
     /// <summary>
     /// Returns the complete keyboard layout mapping
     /// </summary>
-    private List<string> GetKeys()
+    private static List<string> GetKeys()
     {
-        return new List<string>
-        {
+        return
+        [
             // Row 1: ESC, Function keys area
             "esc", "\\", "tab", "capslock", "lshift", "lcontrol", "f12", "«",
             "f9", "9", "o", "l", ",", "<", "????", "leftarrow",
@@ -283,7 +278,7 @@ public class OmenKeyboardController
             // Row 9
             "f8", "8", "i", "k", "m", "fn", "~", "uparrow",
             "playnext", "numpad5", "????", "????", "numpadenter", "numpad."
-        };
+        ];
     }
 
     /// <summary>
@@ -293,14 +288,14 @@ public class OmenKeyboardController
     {
         return new Dictionary<string, List<string>>
         {
-            ["pkeys"] = new List<string> { "p1", "p2", "p3", "p4", "p5" },
-            ["fkeys"] = new List<string> { "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12" },
-            ["media"] = new List<string> { "play", "stop", "playlast", "playnext" },
-            ["system"] = new List<string> { "prtscrn", "sclock", "pause", "insert", "home", "pgup", "del", "delete", "end", "pgdown" },
-            ["arrows"] = new List<string> { "leftarrow", "rightarrow", "uparrow", "downarrow" },
-            ["numpad"] = new List<string> { "numlock", "numpad/", "numpad*", "numpad-", "numpad7", "numpad8", "numpad9", "numpad+", "numpad4", "numpad5", "numpad6", "numpad1", "numpad2", "numpad3", "numpad0", "numpad.", "numpadenter" },
-            ["fps"] = new List<string> { "w", "a", "s", "d" },
-            ["windows"] = new List<string> { "windows" }
-        };
-    }
+			["pkeys"]   = ["p1", "p2", "p3", "p4", "p5"],
+			["fkeys"]   = ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"],
+			["media"]   = ["play", "stop", "playlast", "playnext"],
+			["system"]  = ["prtscrn", "sclock", "pause", "insert", "home", "pgup", "del", "delete", "end", "pgdown"],
+			["arrows"]  = ["leftarrow", "rightarrow", "uparrow", "downarrow"],
+			["numpad"]  = ["numlock", "numpad/", "numpad*", "numpad-", "numpad7", "numpad8", "numpad9", "numpad+", "numpad4", "numpad5", "numpad6", "numpad1", "numpad2", "numpad3", "numpad0", "numpad.", "numpadenter"],
+			["fps"]     = ["w", "a", "s", "d"],
+			["windows"] = ["windows"]
+		};
+	}
 }

@@ -19,8 +19,8 @@ public class WindowsPlatformService : IPlatformService
     private SessionNotificationWindow? _sessionWindow;
 
     // HP Omen keyboard USB identifiers
-    private const int VENDOR_ID = 0x03F0;
-    private const int PRODUCT_ID = 0x1F41;
+    private const int VENDOR_ID = OmenKeyboardConstants.VendorId;
+    private const int PRODUCT_ID = OmenKeyboardConstants.ProductId;
 
     // Deduplication system to prevent rapid successive reapplications
     private DateTime _lastReapplyTime = DateTime.MinValue;
@@ -108,10 +108,7 @@ public class WindowsPlatformService : IPlatformService
 
             if (timeSinceLastReapply < _deduplicationWindow)
             {
-                _logger.LogInformation(
-                    "Skipping color reapply request (reason: {Reason}). " +
-                    "Last reapply was {TimeSinceLastReapply}ms ago (within {Window}ms deduplication window)",
-                    reason, (int)timeSinceLastReapply, _deduplicationWindow);
+                _logger.LogInformation("Skipping color reapply request (reason: {Reason}). Last reapply was {TimeSinceLastReapply}ms ago (within {Window}ms deduplication window)", reason, (int)timeSinceLastReapply, _deduplicationWindow);
                 return;
             }
 
@@ -149,8 +146,7 @@ public class WindowsPlatformService : IPlatformService
                 RequestColorReapply("Session logon", 1500, 5);
             }
             // Also handle remote desktop connections
-            else if (reason == SessionChangeReason.ConsoleConnect ||
-                     reason == SessionChangeReason.RemoteConnect)
+            else if (reason == SessionChangeReason.ConsoleConnect || reason == SessionChangeReason.RemoteConnect)
             {
                 _logger.LogInformation("Console/Remote connected. Requesting color reapplication...");
                 RequestColorReapply("Console/Remote connected", 500, 3);
@@ -187,10 +183,7 @@ public class WindowsPlatformService : IPlatformService
         {
             // WMI query to watch for USB device arrival events
             // This fires immediately when any USB device is connected
-            var query = new WqlEventQuery(
-                "SELECT * FROM __InstanceCreationEvent WITHIN 1 " +
-                "WHERE TargetInstance ISA 'Win32_PnPEntity' " +
-                "AND TargetInstance.DeviceID LIKE 'HID\\\\VID_03F0&PID_1F41%'");
+            var query = new WqlEventQuery("SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_PnPEntity' AND TargetInstance.DeviceID LIKE 'HID\\\\VID_03F0&PID_1F41%'");
 
             _deviceArrivalWatcher = new ManagementEventWatcher(query);
             _deviceArrivalWatcher.EventArrived += OnDeviceArrived;
@@ -292,10 +285,7 @@ public class WindowsPlatformService : IPlatformService
         private static extern bool WTSUnRegisterSessionNotification(IntPtr hWnd);
 
         [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr CreateWindowEx(
-            int dwExStyle, string lpClassName, string lpWindowName, int dwStyle,
-            int x, int y, int nWidth, int nHeight, IntPtr hWndParent,
-            IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+        private static extern IntPtr CreateWindowEx(int dwExStyle, string lpClassName, string lpWindowName, int dwStyle, int x, int y, int nWidth, int nHeight, IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool DestroyWindow(IntPtr hWnd);
@@ -384,9 +374,7 @@ public class WindowsPlatformService : IPlatformService
                 }
 
                 // Create message-only window (HWND_MESSAGE = -3)
-                _hwnd = CreateWindowEx(
-                    0, "OmenKeyboardSessionNotification", "OmenKeyboardSessionWindow", 0,
-                    0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, wndClass.hInstance, IntPtr.Zero);
+                _hwnd = CreateWindowEx(0, "OmenKeyboardSessionNotification", "OmenKeyboardSessionWindow", 0, 0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, wndClass.hInstance, IntPtr.Zero);
 
                 if (_hwnd == IntPtr.Zero)
                 {
@@ -629,8 +617,7 @@ public class WindowsPlatformService : IPlatformService
                     var setting = Marshal.PtrToStructure<POWERBROADCAST_SETTING>(lParam);
 
                     // Check if this is a display or monitor power event
-                    if (setting.PowerSetting == GUID_CONSOLE_DISPLAY_STATE ||
-                        setting.PowerSetting == GUID_MONITOR_POWER_ON)
+                    if (setting.PowerSetting == GUID_CONSOLE_DISPLAY_STATE || setting.PowerSetting == GUID_MONITOR_POWER_ON)
                     {
                         // Data field contains the power state: 0 = off, 1 = on, 2 = dimmed
                         if (setting.Data == 1)

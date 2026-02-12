@@ -16,8 +16,8 @@ public class LinuxPlatformService : IPlatformService
     private CancellationTokenSource? _suspendMonitorCts;
 
     // HP Omen keyboard USB identifiers
-    private const int VENDOR_ID = 0x03F0;
-    private const int PRODUCT_ID = 0x1F41;
+    private const int VENDOR_ID = OmenKeyboardConstants.VendorId;
+    private const int PRODUCT_ID = OmenKeyboardConstants.ProductId;
 
     // Deduplication system to prevent rapid successive reapplications
     private DateTime _lastReapplyTime = DateTime.MinValue;
@@ -64,10 +64,7 @@ public class LinuxPlatformService : IPlatformService
 
             if (timeSinceLastReapply < _deduplicationWindow)
             {
-                _logger.LogInformation(
-                    "Skipping color reapply request (reason: {Reason}). " +
-                    "Last reapply was {TimeSinceLastReapply}ms ago (within {Window}ms deduplication window)",
-                    reason, (int)timeSinceLastReapply, _deduplicationWindow);
+                _logger.LogInformation("Skipping color reapply request (reason: {Reason}). Last reapply was {TimeSinceLastReapply}ms ago (within {Window}ms deduplication window)", reason, (int)timeSinceLastReapply, _deduplicationWindow);
                 return;
             }
 
