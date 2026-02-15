@@ -8,32 +8,17 @@ namespace OmenKeyboardService;
 /// Linux-specific platform service implementation
 /// Handles device monitoring via /dev filesystem watching and suspend/resume detection
 /// </summary>
-public class LinuxPlatformService : IPlatformService
+public class LinuxPlatformService : PlatformServiceBase
 {
-    private readonly ILogger<LinuxPlatformService> _logger;
     private FileSystemWatcher? _deviceWatcher;
     private FileSystemWatcher? _sleepWatcher;
     private CancellationTokenSource? _suspendMonitorCts;
 
-    // HP Omen keyboard USB identifiers
-    private const int VENDOR_ID = OmenKeyboardConstants.VendorId;
-    private const int PRODUCT_ID = OmenKeyboardConstants.ProductId;
+    public override string PlatformName => "Linux";
 
-    // Deduplication system to prevent rapid successive reapplications
-    private DateTime _lastReapplyTime = DateTime.MinValue;
-    private const int _deduplicationWindow = 3000; // 3 seconds
-    private readonly object _reapplyLock = new object();
+    public LinuxPlatformService(ILogger<LinuxPlatformService> logger) : base(logger) { }
 
-    public string PlatformName => "Linux";
-
-    public event EventHandler<ColorReapplyEventArgs>? ColorReapplyRequested;
-
-    public LinuxPlatformService(ILogger<LinuxPlatformService> logger)
-    {
-        _logger = logger;
-    }
-
-    public void Initialize(string? hotkey = null)
+    public override void Initialize(string? hotkey = null)
     {
         _logger.LogInformation("Initializing Linux platform services...");
 
@@ -50,34 +35,6 @@ public class LinuxPlatformService : IPlatformService
         SetupSuspendResumeMonitoring();
 
         _logger.LogInformation("Linux platform services initialized (device monitoring, suspend/resume detection)");
-    }
-
-    /// <summary>
-    /// Requests a color reapplication with deduplication to prevent rapid successive triggers
-    /// </summary>
-    private void RequestColorReapply(string reason, int delayMs, int retryCount)
-    {
-        lock (_reapplyLock)
-        {
-            var now = DateTime.UtcNow;
-            var timeSinceLastReapply = (now - _lastReapplyTime).TotalMilliseconds;
-
-            if (timeSinceLastReapply < _deduplicationWindow)
-            {
-                _logger.LogInformation("Skipping color reapply request (reason: {Reason}). Last reapply was {TimeSinceLastReapply}ms ago (within {Window}ms deduplication window)", reason, (int)timeSinceLastReapply, _deduplicationWindow);
-                return;
-            }
-
-            _logger.LogInformation("Processing color reapply request: {Reason}", reason);
-            _lastReapplyTime = now;
-
-            ColorReapplyRequested?.Invoke(this, new ColorReapplyEventArgs
-            {
-                Reason = reason,
-                DelayMs = delayMs,
-                RetryCount = retryCount
-            });
-        }
     }
 
     /// <summary>
@@ -177,8 +134,7 @@ public class LinuxPlatformService : IPlatformService
                     string currentValue = File.ReadAllText(wakeupCountPath).Trim();
                     if (currentValue != lastValue)
                     {
-                        _logger.LogInformation("System resumed from suspend (wakeup_count changed: {Old} -> {New})",
-                            lastValue, currentValue);
+                        _logger.LogInformation("System resumed from suspend (wakeup_count changed: {Old} -> {New})", lastValue, currentValue);
                         lastValue = currentValue;
 
                         RequestColorReapply("System resumed from suspend", 2000, 5);
@@ -275,11 +231,10 @@ public class LinuxPlatformService : IPlatformService
 
             // Look for HID_ID line which contains vendor:product
             // Format: HID_ID=0003:000003F0:00001F41
-            var vendorHex = VENDOR_ID.ToString("X4");
-            var productHex = PRODUCT_ID.ToString("X4");
+            var vendorHex = OmenKeyboardConstants.VendorId.ToString("X4");
+            var productHex = OmenKeyboardConstants.ProductId.ToString("X4");
 
-            bool isMatch = uevent.Contains(vendorHex, StringComparison.OrdinalIgnoreCase) &&
-                          uevent.Contains(productHex, StringComparison.OrdinalIgnoreCase);
+            bool isMatch = uevent.Contains(vendorHex, StringComparison.OrdinalIgnoreCase) && uevent.Contains(productHex, StringComparison.OrdinalIgnoreCase);
 
             return isMatch;
         }
@@ -290,7 +245,7 @@ public class LinuxPlatformService : IPlatformService
         }
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         _suspendMonitorCts?.Cancel();
         _suspendMonitorCts?.Dispose();

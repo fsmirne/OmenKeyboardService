@@ -33,9 +33,6 @@ public class OmenKeyboardController
     private const string BODY1 = "ffff0000ffffffffffffffff00ffff00ffff0000ffffffffff00ffffffffff00ffff0000ffffffffff00ffffff00ff00ffff0000ffffffffffffffff";
     private const string BODY2 = "ffffff00ffff0000ffffffffffffffffffff0000ffff0000000000000000000000000000000000000000000000000000000000000000000000000000";
 
-    // HP Omen keyboard USB identifiers
-    private const int VENDOR_ID = OmenKeyboardConstants.VendorId;
-    private const int PRODUCT_ID = OmenKeyboardConstants.ProductId;
 
     public OmenKeyboardController(ILogger<OmenKeyboardController> logger)
     {
@@ -87,15 +84,15 @@ public class OmenKeyboardController
     private HidDevice OpenKeyboardDevice()
     {
         var deviceList = DeviceList.Local;
-        var devices = deviceList.GetHidDevices(VENDOR_ID, PRODUCT_ID).ToList();
+        var devices = deviceList.GetHidDevices(OmenKeyboardConstants.VendorId, OmenKeyboardConstants.ProductId).ToList();
 
-        _logger.LogDebug("Searching for HP Omen keyboard (VID: 0x{VendorId:X4}, PID: 0x{ProductId:X4})...", VENDOR_ID, PRODUCT_ID);
+        _logger.LogDebug("Searching for HP Omen keyboard (VID: 0x{VendorId:X4}, PID: 0x{ProductId:X4})...", OmenKeyboardConstants.VendorId, OmenKeyboardConstants.ProductId);
         _logger.LogDebug("Found {Count} matching HID device(s)", devices.Count);
 
         if (!devices.Any())
         {
             _logger.LogWarning("HP Omen keyboard not found. Keyboard may not be connected or may still be initializing.");
-            throw new InvalidOperationException($"HP Omen keyboard not found (VID: 0x{VENDOR_ID:X4}, PID: 0x{PRODUCT_ID:X4}). Please ensure the keyboard is connected and initialized.");
+            throw new InvalidOperationException($"HP Omen keyboard not found (VID: 0x{OmenKeyboardConstants.VendorId:X4}, PID: 0x{OmenKeyboardConstants.ProductId:X4}). Please ensure the keyboard is connected and initialized.");
         }
 
         // Select the device with the longest path (most specific interface)

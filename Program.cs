@@ -19,9 +19,9 @@ try
         minimumLogLevel = parsedLevel;
     }
 }
-catch
+catch (Exception ex)
 {
-    // If config reading fails, use default Warning level
+    Console.Error.WriteLine($"Failed to read config for log level, using default Warning: {ex.Message}");
 }
 
 // Configure logging based on platform

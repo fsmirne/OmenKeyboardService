@@ -12,31 +12,16 @@ namespace OmenKeyboardService;
 /// Handles Windows power events, session events, and WMI device monitoring
 /// </summary>
 [SupportedOSPlatform("windows")]
-public class WindowsPlatformService : IPlatformService
+public class WindowsPlatformService : PlatformServiceBase
 {
-    private readonly ILogger<WindowsPlatformService> _logger;
     private ManagementEventWatcher? _deviceArrivalWatcher;
     private SessionNotificationWindow? _sessionWindow;
 
-    // HP Omen keyboard USB identifiers
-    private const int VENDOR_ID = OmenKeyboardConstants.VendorId;
-    private const int PRODUCT_ID = OmenKeyboardConstants.ProductId;
+    public override string PlatformName => "Windows";
 
-    // Deduplication system to prevent rapid successive reapplications
-    private DateTime _lastReapplyTime = DateTime.MinValue;
-    private const int _deduplicationWindow = 3000; // 3 seconds
-    private readonly object _reapplyLock = new object();
+    public WindowsPlatformService(ILogger<WindowsPlatformService> logger) : base(logger) { }
 
-    public string PlatformName => "Windows";
-
-    public event EventHandler<ColorReapplyEventArgs>? ColorReapplyRequested;
-
-    public WindowsPlatformService(ILogger<WindowsPlatformService> logger)
-    {
-        _logger = logger;
-    }
-
-    public void Initialize(string? hotkey = null)
+    public override void Initialize(string? hotkey = null)
     {
         _logger.LogInformation("Initializing Windows platform services...");
 
@@ -90,37 +75,6 @@ public class WindowsPlatformService : IPlatformService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error handling power mode change");
-        }
-    }
-
-    /// <summary>
-    /// Requests a color reapplication with deduplication to prevent rapid successive triggers
-    /// </summary>
-    /// <param name="reason">Reason for the reapplication request</param>
-    /// <param name="delayMs">Delay before applying colors</param>
-    /// <param name="retryCount">Number of retry attempts</param>
-    private void RequestColorReapply(string reason, int delayMs, int retryCount)
-    {
-        lock (_reapplyLock)
-        {
-            var now = DateTime.UtcNow;
-            var timeSinceLastReapply = (now - _lastReapplyTime).TotalMilliseconds;
-
-            if (timeSinceLastReapply < _deduplicationWindow)
-            {
-                _logger.LogInformation("Skipping color reapply request (reason: {Reason}). Last reapply was {TimeSinceLastReapply}ms ago (within {Window}ms deduplication window)", reason, (int)timeSinceLastReapply, _deduplicationWindow);
-                return;
-            }
-
-            _logger.LogInformation("Processing color reapply request: {Reason}", reason);
-            _lastReapplyTime = now;
-
-            ColorReapplyRequested?.Invoke(this, new ColorReapplyEventArgs
-            {
-                Reason = reason,
-                DelayMs = delayMs,
-                RetryCount = retryCount
-            });
         }
     }
 
@@ -213,7 +167,7 @@ public class WindowsPlatformService : IPlatformService
         }
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         if (_deviceArrivalWatcher != null)
         {
@@ -383,64 +337,9 @@ public class WindowsPlatformService : IPlatformService
                     return;
                 }
 
-                // Register for session notifications
-                if (!WTSRegisterSessionNotification(_hwnd, NOTIFY_FOR_ALL_SESSIONS))
-                {
-                    int error = Marshal.GetLastWin32Error();
-                    _logger.LogWarning("Failed to register for session notifications (error: {Error})", error);
-                    return;
-                }
-
-                // Register for display power notifications
-                if (_onDisplayPowerChange != null)
-                {
-                    var displayGuid = GUID_CONSOLE_DISPLAY_STATE;
-                    _displayPowerNotifyHandle = RegisterPowerSettingNotification(_hwnd, ref displayGuid, 0);
-                    if (_displayPowerNotifyHandle == IntPtr.Zero)
-                    {
-                        int error = Marshal.GetLastWin32Error();
-                        _logger.LogWarning("Failed to register for display power notifications (error: {Error})", error);
-                    }
-                    else
-                    {
-                        _logger.LogInformation("Registered for display power notifications");
-                    }
-
-                    var monitorGuid = GUID_MONITOR_POWER_ON;
-                    _monitorPowerNotifyHandle = RegisterPowerSettingNotification(_hwnd, ref monitorGuid, 0);
-                    if (_monitorPowerNotifyHandle == IntPtr.Zero)
-                    {
-                        int error = Marshal.GetLastWin32Error();
-                        _logger.LogWarning("Failed to register for monitor power notifications (error: {Error})", error);
-                    }
-                    else
-                    {
-                        _logger.LogInformation("Registered for monitor power notifications");
-                    }
-
-                    // Register for user presence notifications (detects user activity after idle/away)
-                    // Note: This GUID may not be supported on all Windows versions or hardware
-                    var userPresenceGuid = GUID_SESSION_USER_PRESENCE;
-                    _userPresenceNotifyHandle = RegisterPowerSettingNotification(_hwnd, ref userPresenceGuid, 0);
-                    if (_userPresenceNotifyHandle == IntPtr.Zero)
-                    {
-                        int error = Marshal.GetLastWin32Error();
-                        // Error 87 (ERROR_INVALID_PARAMETER) means this GUID is not supported on this system
-                        // This is non-critical, as we have other events (display power, session unlock, etc.)
-                        if (error == 87)
-                        {
-                            _logger.LogDebug("User presence notifications not supported on this system (error 87). This is normal for some laptops/configurations.");
-                        }
-                        else
-                        {
-                            _logger.LogWarning("Failed to register for user presence notifications (error: {Error})", error);
-                        }
-                    }
-                    else
-                    {
-                        _logger.LogInformation("Registered for user presence notifications");
-                    }
-                }
+                RegisterSessionNotifications();
+                RegisterDisplayPowerNotifications();
+                RegisterUserPresenceNotifications();
 
                 // Register global hotkey if configured
                 if (!string.IsNullOrWhiteSpace(_hotkey))
@@ -453,6 +352,72 @@ public class WindowsPlatformService : IPlatformService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to initialize session notification window");
+            }
+        }
+
+        private void RegisterSessionNotifications()
+        {
+            if (!WTSRegisterSessionNotification(_hwnd, NOTIFY_FOR_ALL_SESSIONS))
+            {
+                int error = Marshal.GetLastWin32Error();
+                _logger.LogWarning("Failed to register for session notifications (error: {Error})", error);
+            }
+        }
+
+        private void RegisterDisplayPowerNotifications()
+        {
+            if (_onDisplayPowerChange == null) return;
+
+            var displayGuid = GUID_CONSOLE_DISPLAY_STATE;
+            _displayPowerNotifyHandle = RegisterPowerSettingNotification(_hwnd, ref displayGuid, 0);
+            if (_displayPowerNotifyHandle == IntPtr.Zero)
+            {
+                int error = Marshal.GetLastWin32Error();
+                _logger.LogWarning("Failed to register for display power notifications (error: {Error})", error);
+            }
+            else
+            {
+                _logger.LogInformation("Registered for display power notifications");
+            }
+
+            var monitorGuid = GUID_MONITOR_POWER_ON;
+            _monitorPowerNotifyHandle = RegisterPowerSettingNotification(_hwnd, ref monitorGuid, 0);
+            if (_monitorPowerNotifyHandle == IntPtr.Zero)
+            {
+                int error = Marshal.GetLastWin32Error();
+                _logger.LogWarning("Failed to register for monitor power notifications (error: {Error})", error);
+            }
+            else
+            {
+                _logger.LogInformation("Registered for monitor power notifications");
+            }
+        }
+
+        private void RegisterUserPresenceNotifications()
+        {
+            if (_onDisplayPowerChange == null) return;
+
+            // Register for user presence notifications (detects user activity after idle/away)
+            // Note: This GUID may not be supported on all Windows versions or hardware
+            var userPresenceGuid = GUID_SESSION_USER_PRESENCE;
+            _userPresenceNotifyHandle = RegisterPowerSettingNotification(_hwnd, ref userPresenceGuid, 0);
+            if (_userPresenceNotifyHandle == IntPtr.Zero)
+            {
+                int error = Marshal.GetLastWin32Error();
+                // Error 87 (ERROR_INVALID_PARAMETER) means this GUID is not supported on this system
+                // This is non-critical, as we have other events (display power, session unlock, etc.)
+                if (error == 87)
+                {
+                    _logger.LogDebug("User presence notifications not supported on this system (error 87). This is normal for some laptops/configurations.");
+                }
+                else
+                {
+                    _logger.LogWarning("Failed to register for user presence notifications (error: {Error})", error);
+                }
+            }
+            else
+            {
+                _logger.LogInformation("Registered for user presence notifications");
             }
         }
 
@@ -587,71 +552,86 @@ public class WindowsPlatformService : IPlatformService
         {
             if (msg == WM_WTSSESSION_CHANGE)
             {
-                try
-                {
-                    var reason = (SessionChangeReason)wParam.ToInt32();
-                    _onSessionChange(reason);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error processing session change notification");
-                }
+                HandleSessionChangeMessage(wParam);
             }
             else if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID)
             {
-                try
-                {
-                    _logger.LogInformation("Global hotkey pressed. Requesting color reapplication...");
-                    _onDisplayPowerChange?.Invoke();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error processing hotkey");
-                }
+                HandleHotkeyMessage();
             }
             else if (msg == WM_POWERBROADCAST && wParam.ToInt32() == PBT_POWERSETTINGCHANGE)
             {
-                try
-                {
-                    // Parse POWERBROADCAST_SETTING structure
-                    var setting = Marshal.PtrToStructure<POWERBROADCAST_SETTING>(lParam);
-
-                    // Check if this is a display or monitor power event
-                    if (setting.PowerSetting == GUID_CONSOLE_DISPLAY_STATE || setting.PowerSetting == GUID_MONITOR_POWER_ON)
-                    {
-                        // Data field contains the power state: 0 = off, 1 = on, 2 = dimmed
-                        if (setting.Data == 1)
-                        {
-                            _logger.LogInformation("Display powered ON. Requesting color reapplication...");
-                            _onDisplayPowerChange?.Invoke();
-                        }
-                        else
-                        {
-                            _logger.LogDebug("Display power state changed to: {State}", setting.Data);
-                        }
-                    }
-                    // Check if this is a user presence event
-                    else if (setting.PowerSetting == GUID_SESSION_USER_PRESENCE)
-                    {
-                        // Data field: 0 = user absent/away, 2 = user present/active
-                        if (setting.Data == 2)
-                        {
-                            _logger.LogInformation("User presence detected (returned from idle). Requesting color reapplication...");
-                            _onDisplayPowerChange?.Invoke();
-                        }
-                        else
-                        {
-                            _logger.LogDebug("User presence state changed to: {State}", setting.Data);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error processing power broadcast notification");
-                }
+                HandlePowerBroadcastMessage(lParam);
             }
 
             return DefWindowProc(hWnd, msg, wParam, lParam);
+        }
+
+        private void HandleSessionChangeMessage(IntPtr wParam)
+        {
+            try
+            {
+                var reason = (SessionChangeReason)wParam.ToInt32();
+                _onSessionChange(reason);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing session change notification");
+            }
+        }
+
+        private void HandleHotkeyMessage()
+        {
+            try
+            {
+                _logger.LogInformation("Global hotkey pressed. Requesting color reapplication...");
+                _onDisplayPowerChange?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing hotkey");
+            }
+        }
+
+        private void HandlePowerBroadcastMessage(IntPtr lParam)
+        {
+            try
+            {
+                // Parse POWERBROADCAST_SETTING structure
+                var setting = Marshal.PtrToStructure<POWERBROADCAST_SETTING>(lParam);
+
+                // Check if this is a display or monitor power event
+                if (setting.PowerSetting == GUID_CONSOLE_DISPLAY_STATE || setting.PowerSetting == GUID_MONITOR_POWER_ON)
+                {
+                    // Data field contains the power state: 0 = off, 1 = on, 2 = dimmed
+                    if (setting.Data == 1)
+                    {
+                        _logger.LogInformation("Display powered ON. Requesting color reapplication...");
+                        _onDisplayPowerChange?.Invoke();
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Display power state changed to: {State}", setting.Data);
+                    }
+                }
+                // Check if this is a user presence event
+                else if (setting.PowerSetting == GUID_SESSION_USER_PRESENCE)
+                {
+                    // Data field: 0 = user absent/away, 2 = user present/active
+                    if (setting.Data == 2)
+                    {
+                        _logger.LogInformation("User presence detected (returned from idle). Requesting color reapplication...");
+                        _onDisplayPowerChange?.Invoke();
+                    }
+                    else
+                    {
+                        _logger.LogDebug("User presence state changed to: {State}", setting.Data);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing power broadcast notification");
+            }
         }
 
         public void Dispose()

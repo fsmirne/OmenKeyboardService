@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace OmenKeyboardService;
 
 /// <summary>
@@ -16,4 +18,25 @@ public class KeyboardConfig
     public int? RefreshIntervalSeconds { get; set; }
 
     public bool? KvmMode { get; set; }
+
+    /// <summary>
+    /// Validates configuration values and throws if any are invalid
+    /// </summary>
+    public void Validate()
+    {
+        if (RefreshIntervalSeconds.HasValue && RefreshIntervalSeconds.Value < 0)
+        {
+            throw new InvalidOperationException($"RefreshIntervalSeconds must be >= 0, got {RefreshIntervalSeconds.Value}");
+        }
+
+        if (LogLevel != null && !Enum.TryParse<Microsoft.Extensions.Logging.LogLevel>(LogLevel, true, out _))
+        {
+            throw new InvalidOperationException($"Invalid LogLevel '{LogLevel}'. Valid values: Trace, Debug, Information, Warning, Error, Critical, None");
+        }
+
+        if (Profile == null)
+        {
+            throw new InvalidOperationException("Profile must not be null");
+        }
+    }
 }

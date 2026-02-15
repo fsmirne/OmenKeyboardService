@@ -16,12 +16,18 @@ public class KeyboardRgbService : BackgroundService
     private FileSystemWatcher? _configWatcher;
     private KeyboardConfig? _currentConfig;
 
+    // Retry delay constants
+    private const int KvmInitialDelayMs = 1000;
+    private const int DefaultInitialDelayMs = 500;
+    private const int KvmMaxDelayMs = 30000;
+    private const int DefaultMaxDelayMs = 8000;
+
     // Debouncing for config file changes
     private CancellationTokenSource? _configChangeCts;
     private readonly object _configChangeLock = new object();
 
     private PeriodicTimer? _periodicTimer;
-    
+
 
     private readonly Channel<ColorReapplyEventArgs> _reapplyChannel = Channel.CreateUnbounded<ColorReapplyEventArgs>();
     private Task? _reapplyWorkerTask;
@@ -104,12 +110,7 @@ public class KeyboardRgbService : BackgroundService
             _logger.LogInformation("Applying profile: {ProfileName}", config.ProfileName ?? "Custom");
 
             // Convert hex color strings to uint values
-            var colorMap = config.Profile
-                .Where(kvp => !string.IsNullOrWhiteSpace(kvp.Value))
-                .ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => ParseHexColor(kvp.Value)
-                );
+            var colorMap = config.Profile.Where(kvp => !string.IsNullOrWhiteSpace(kvp.Value)).ToDictionary(kvp => kvp.Key, kvp => ParseHexColor(kvp.Value));
 
             // Apply the colors to the keyboard with retry logic
             await ApplyColorsWithRetry(colorMap, retryCount);
@@ -127,56 +128,30 @@ public class KeyboardRgbService : BackgroundService
     /// </summary>
     private async Task ApplyColorsWithRetry(Dictionary<string, uint> colorMap, int maxRetries)
     {
-        int attempt = 0;
-        Exception? lastException = null;
-
-        // In KVM mode, use longer initial delay and higher cap for retry intervals
         bool kvmMode = _currentConfig?.KvmMode ?? false;
-        int delayMs = kvmMode ? 1000 : 500; // KVM: start with 1s, normal: 500ms
-        int maxDelayMs = kvmMode ? 30000 : 8000; // KVM: cap at 30s, normal: 8s
+        string? contextNote = kvmMode ? " (KVM mode - keyboard may be switched to another computer)" : null;
 
-        while (attempt < maxRetries)
+        var retryOptions = new RetryOptions(
+            MaxRetries: maxRetries,
+            InitialDelayMs: kvmMode ? KvmInitialDelayMs : DefaultInitialDelayMs,
+            MaxDelayMs: kvmMode ? KvmMaxDelayMs : DefaultMaxDelayMs,
+            OperationName: "apply colors"
+        );
+
+        try
         {
-            try
-            {
-                attempt++;
-                _keyboardController.ApplyColors(colorMap);
-
-                // Success - log only if we had to retry
-                if (attempt > 1)
-                {
-                    _logger.LogInformation("Successfully applied colors on attempt {Attempt}{KvmNote}",
-                        attempt, kvmMode ? " (KVM mode)" : "");
-                }
-
-                return; // Success, exit the retry loop
-            }
-            catch (Exception ex)
-            {
-                lastException = ex;
-
-                if (attempt < maxRetries)
-                {
-                    string kvmNote = kvmMode ? " (KVM mode - keyboard may be switched to another computer)" : "";
-                    _logger.LogWarning(ex, "Failed to apply colors (attempt {Attempt}/{MaxRetries}). Retrying in {DelayMs}ms...{KvmNote}",
-                        attempt, maxRetries, delayMs, kvmNote);
-                    await Task.Delay(delayMs);
-
-                    // Exponential backoff with cap
-                    delayMs = Math.Min(delayMs * 2, maxDelayMs);
-                }
-            }
+            await RetryPolicy.ExecuteWithRetryAsync(() => { _keyboardController.ApplyColors(colorMap); return Task.CompletedTask; }, retryOptions, _logger, contextNote);
         }
-
-        // All retries failed
-        if (kvmMode)
+        catch (RetryExhaustedException ex)
         {
-            _logger.LogWarning(lastException, "Failed to apply colors after {MaxRetries} attempts (KVM mode). " +
-                "Keyboard may be switched to another computer. Will retry when keyboard reconnects or on next trigger.", maxRetries);
-        }
-        else
-        {
-            _logger.LogError(lastException, "Failed to apply colors after {MaxRetries} attempts. Keyboard may not be ready or connected.", maxRetries);
+            if (kvmMode)
+            {
+                _logger.LogWarning(ex.InnerException, "Failed to apply colors after {MaxRetries} attempts (KVM mode). Keyboard may be switched to another computer. Will retry when keyboard reconnects or on next trigger.", maxRetries);
+            }
+            else
+            {
+                _logger.LogError(ex.InnerException, "Failed to apply colors after {MaxRetries} attempts. Keyboard may not be ready or connected.", maxRetries);
+            }
         }
     }
 
@@ -257,7 +232,7 @@ public class KeyboardRgbService : BackgroundService
                 }
                 catch (OperationCanceledException)
                 {
-                    // Another change came in, this reload was cancelled
+                    _logger.LogDebug("Config reload cancelled (superseded by newer change)");
                 }
                 catch (Exception ex)
                 {
@@ -362,6 +337,5 @@ public class KeyboardRgbService : BackgroundService
         _platformService.ColorReapplyRequested -= OnColorReapplyRequested;
         _platformService.Dispose();
         base.Dispose();
-        GC.SuppressFinalize(this);
     }
 }

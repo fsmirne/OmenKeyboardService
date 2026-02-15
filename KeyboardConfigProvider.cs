@@ -27,8 +27,9 @@ public sealed class KeyboardConfigProvider
         }
 
         var json = File.ReadAllText(_configPath);
-        var config = JsonSerializer.Deserialize<KeyboardConfig>(json, JsonOptions);
-        return config ?? new KeyboardConfig();
+        var config = JsonSerializer.Deserialize<KeyboardConfig>(json, JsonOptions) ?? new KeyboardConfig();
+        config.Validate();
+        return config;
     }
 
     public async Task<KeyboardConfig> LoadOrCreateDefaultAsync(CancellationToken cancellationToken = default)
@@ -39,8 +40,9 @@ public sealed class KeyboardConfigProvider
         }
 
         var json = await File.ReadAllTextAsync(_configPath, cancellationToken);
-        var config = JsonSerializer.Deserialize<KeyboardConfig>(json, JsonOptions);
-        return config ?? new KeyboardConfig();
+        var config = JsonSerializer.Deserialize<KeyboardConfig>(json, JsonOptions) ?? new KeyboardConfig();
+        config.Validate();
+        return config;
     }
 
     public void CreateDefaultConfig()
