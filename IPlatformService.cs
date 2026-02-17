@@ -14,8 +14,7 @@ public interface IPlatformService : IDisposable
     /// <summary>
     /// Initializes platform-specific monitoring (power events, device events, etc.)
     /// </summary>
-    /// <param name="hotkey">Optional global hotkey to manually trigger color reapplication</param>
-    void Initialize(string? hotkey = null);
+    void Initialize();
 
     /// <summary>
     /// Gets the platform name for logging purposes

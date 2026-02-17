@@ -21,12 +21,12 @@ public class WindowsPlatformService : PlatformServiceBase
 
     public WindowsPlatformService(ILogger<WindowsPlatformService> logger) : base(logger) { }
 
-    public override void Initialize(string? hotkey = null)
+    public override void Initialize()
     {
         _logger.LogInformation("Initializing Windows platform services...");
 
-        // Set up power management monitoring (pass hotkey for global hotkey registration)
-        SetupPowerManagement(hotkey);
+        // Set up power management monitoring
+        SetupPowerManagement();
 
         // Set up device monitoring
         SetupDeviceMonitoring();
@@ -37,15 +37,14 @@ public class WindowsPlatformService : PlatformServiceBase
     /// <summary>
     /// Sets up power management event monitoring to restore colors after sleep/wake
     /// </summary>
-    /// <param name="hotkey">Optional global hotkey for manual color reapplication</param>
-    private void SetupPowerManagement(string? hotkey)
+    private void SetupPowerManagement()
     {
         try
         {
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
             // Use Win32 API for session notifications (more reliable for services)
-            _sessionWindow = new SessionNotificationWindow(_logger, OnSessionChange, OnDisplayPowerChange, hotkey);
+            _sessionWindow = new SessionNotificationWindow(_logger, OnSessionChange, OnDisplayPowerChange);
             _sessionWindow.Initialize();
 
             _logger.LogInformation("Power management and session monitoring enabled");

@@ -23,7 +23,7 @@ public abstract class PlatformServiceBase : IPlatformService
         _logger = logger;
     }
 
-    public abstract void Initialize(string? hotkey = null);
+    public abstract void Initialize();
 
     /// <summary>
     /// Requests a color reapplication with deduplication to prevent rapid successive triggers

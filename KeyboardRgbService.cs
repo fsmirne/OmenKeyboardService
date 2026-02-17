@@ -65,7 +65,7 @@ public class KeyboardRgbService : BackgroundService
 
             // Initialize platform-specific services (power events, device monitoring, etc.)
             _platformService.ColorReapplyRequested += OnColorReapplyRequested;
-            _platformService.Initialize(_currentConfig?.Hotkey);
+            _platformService.Initialize();
 
             // Set up periodic refresh if configured
             SetupPeriodicRefresh();
