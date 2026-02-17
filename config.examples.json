@@ -1,144 +1,138 @@
 {
-  "exampleProfiles": {
-    "Gaming - Red WASD": {
-      "profileName": "Gaming",
-      "logLevel": "Warning",
-      "profile": {
-        "fps": "FF0000",
-        "arrows": "FF0000",
-        "fkeys": "0099FF",
-        "pkeys": "FF00FF",
-        "media": "FFFF00",
-        "numpad": "00FFFF",
-        "windows": "FF6600",
-		"esc": "FF6600"
-      }
-    },
-    "Work - Calm Blues": {
-      "profileName": "Work",
-	  "logLevel": "Warning",
-      "profile": {
-        "fkeys": "4488FF",
-        "pkeys": "6699FF",
-        "media": "88AAFF",
-        "arrows": "AACCFF",
-        "windows": "CCDDFF",
-        "all": "88BBFF"
-      }
-    },
-    "Cyberpunk - Purple/Pink": {
-      "profileName": "Cyberpunk",
-	  "logLevel": "Warning",
-      "profile": {
-        "fps": "FF00FF",
-        "arrows": "FF00FF",
-        "fkeys": "FF0088",
-        "pkeys": "8800FF",
-        "numpad": "FF0088",
-        "all": "330066"
-      }
-    },
-    "Hacker - Matrix Green": {
-      "profileName": "Hacker",
-	  "logLevel": "Warning",
-      "profile": {
-        "all": "00FF00"
-      }
-    },
-    "Sunset - Orange/Red": {
-      "profileName": "Sunset",
-	  "logLevel": "Warning",
-      "profile": {
-        "fkeys": "FF6600",
-        "fps": "FF3300",
-        "arrows": "FF3300",
-        "pkeys": "FF0066",
-        "media": "FF9900",
-        "numpad": "FFAA00",
-        "all": "FF8844"
-      }
-    },
-    "Minimal - White": {
-      "profileName": "Minimal",
-	  "logLevel": "Warning",
-      "profile": {
-        "all": "FFFFFF"
-      }
-    },
-    "Rainbow Keys": {
-      "profileName": "Rainbow",
-	  "logLevel": "Warning",
-      "profile": {
-        "fkeys": "FF0000",
-        "pkeys": "FF7700",
-        "media": "FFFF00",
-        "fps": "00FF00",
-        "arrows": "0088FF",
-        "numpad": "0000FF",
-        "windows": "8800FF"
-      }
-    },
-    "Fire - Red/Orange/Yellow": {
-      "profileName": "Fire",
-	  "logLevel": "Warning",
-      "profile": {
-        "fps": "FF0000",
-        "arrows": "FF3300",
-        "fkeys": "FF6600",
-        "pkeys": "FF9900",
-        "media": "FFAA00",
-        "numpad": "FFCC00"
-      }
-    },
-    "Ice - Blue/Cyan": {
-      "profileName": "Ice",
-	  "logLevel": "Warning",
-      "profile": {
-        "all": "88DDFF",
-        "fps": "00CCFF",
-        "arrows": "00FFFF",
-        "fkeys": "66BBFF"
-      }
-    },
-    "Individual Key Example": {
-      "profileName": "Custom Keys",
-	  "logLevel": "Warning",
-      "profile": {
-        "w": "FF0000",
-        "a": "00FF00",
-        "s": "0000FF",
-        "d": "FFFF00",
-        "esc": "FF00FF",
-        "enter": "00FFFF",
-        "space": "FFFFFF"
-      }
-    }
-  },
-  "usage": {
-    "instructions": [
-      "Copy one of the example profiles above and paste it into config.json",
-      "Remove the outer 'exampleProfiles' wrapper - only keep the profile object",
-      "Save the file and the service will automatically reload the configuration",
-      "You can mix group names (fps, arrows, fkeys, etc.) with individual key names",
-      "Color format is hex RGB: RRGGBB (e.g., FF0000 = red, 00FF00 = green, 0000FF = blue)"
-    ],
-    "logLevelOptions": {
-      "Warning": "Default - Only logs warnings and errors (recommended for normal use)",
-      "Information": "Detailed logging - Logs all operations (use when debugging issues)",
-      "Error": "Only errors - Minimal logging, only critical errors",
-      "Debug": "Very detailed - Includes debug information (very verbose)",
-      "Note": "Change 'logLevel' in config.json to adjust logging verbosity. Service restart required for changes to take effect."
-    },
-    "availableGroups": {
-      "fps": "WASD keys",
-      "arrows": "Arrow keys (up, down, left, right)",
-      "fkeys": "Function keys F1-F12",
-      "pkeys": "Programmable P1-P5 keys",
-      "media": "Media control keys (play, stop, next, previous)",
-      "numpad": "Numeric keypad",
-      "system": "System keys (print screen, scroll lock, pause, insert, home, page up/down, delete, end)",
-      "windows": "Windows key",
-      "all": "All keys (default color)"
-    }
-  }
+	"exampleProfiles": {
+		"Gaming - Red WASD": {
+			"profileName": "Gaming",
+			"logLevel": "Warning",
+			"profile": {
+				"fps": "FF0000",
+				"arrows": "FF0000",
+				"fkeys": "0099FF",
+				"pkeys": "FF00FF",
+				"media": "FFFF00",
+				"numpad": "00FFFF",
+				"windows": "FF6600",
+				"esc": "FF6600"
+			}
+		},
+		"Work - Calm Blues": {
+			"profileName": "Work",
+			"logLevel": "Warning",
+			"profile": {
+				"fkeys": "4488FF",
+				"pkeys": "6699FF",
+				"media": "88AAFF",
+				"arrows": "AACCFF",
+				"windows": "CCDDFF",
+				"all": "88BBFF"
+			}
+		},
+		"Cyberpunk - Purple/Pink": {
+			"profileName": "Cyberpunk",
+			"logLevel": "Warning",
+			"profile": {
+				"fps": "FF00FF",
+				"arrows": "FF00FF",
+				"fkeys": "FF0088",
+				"pkeys": "8800FF",
+				"numpad": "FF0088",
+				"all": "330066"
+			}
+		},
+		"Hacker - Matrix Green": {
+			"profileName": "Hacker",
+			"logLevel": "Warning",
+			"profile": {
+				"all": "00FF00"
+			}
+		},
+		"Sunset - Orange/Red": {
+			"profileName": "Sunset",
+			"logLevel": "Warning",
+			"profile": {
+				"fkeys": "FF6600",
+				"fps": "FF3300",
+				"arrows": "FF3300",
+				"pkeys": "FF0066",
+				"media": "FF9900",
+				"numpad": "FFAA00",
+				"all": "FF8844"
+			}
+		},
+		"Minimal - White": {
+			"profileName": "Minimal",
+			"logLevel": "Warning",
+			"profile": {
+				"all": "FFFFFF"
+			}
+		},
+		"Rainbow Keys": {
+			"profileName": "Rainbow",
+			"logLevel": "Warning",
+			"profile": {
+				"fkeys": "FF0000",
+				"pkeys": "FF7700",
+				"media": "FFFF00",
+				"fps": "00FF00",
+				"arrows": "0088FF",
+				"numpad": "0000FF",
+				"windows": "8800FF"
+			}
+		},
+		"Fire - Red/Orange/Yellow": {
+			"profileName": "Fire",
+			"logLevel": "Warning",
+			"profile": {
+				"fps": "FF0000",
+				"arrows": "FF3300",
+				"fkeys": "FF6600",
+				"pkeys": "FF9900",
+				"media": "FFAA00",
+				"numpad": "FFCC00"
+			}
+		},
+		"Ice - Blue/Cyan": {
+			"profileName": "Ice",
+			"logLevel": "Warning",
+			"profile": {
+				"all": "88DDFF",
+				"fps": "00CCFF",
+				"arrows": "00FFFF",
+				"fkeys": "66BBFF"
+			}
+		},
+		"Individual Key Example": {
+			"profileName": "Custom Keys",
+			"logLevel": "Warning",
+			"profile": {
+				"w": "FF0000",
+				"a": "00FF00",
+				"s": "0000FF",
+				"d": "FFFF00",
+				"esc": "FF00FF",
+				"enter": "00FFFF",
+				"space": "FFFFFF"
+			}
+		}
+	},
+	"usage": {
+		"instructions": ["Copy one of the example profiles above and paste it into config.json", "Remove the outer 'exampleProfiles' wrapper - only keep the profile object", "Save the file and the service will automatically reload the configuration", "You can mix group names (fps, arrows, fkeys, etc.) with individual key names", "Color format is hex RGB: RRGGBB (e.g., FF0000 = red, 00FF00 = green, 0000FF = blue)"],
+		"logLevelOptions": {
+			"Warning": "Default - Only logs warnings and errors (recommended for normal use)",
+			"Information": "Detailed logging - Logs all operations (use when debugging issues)",
+			"Error": "Only errors - Minimal logging, only critical errors",
+			"Debug": "Very detailed - Includes debug information (very verbose)",
+			"Note": "Change 'logLevel' in config.json to adjust logging verbosity. Service restart required for changes to take effect."
+		},
+		"availableGroups": {
+			"fps": "WASD keys",
+			"arrows": "Arrow keys (up, down, left, right)",
+			"fkeys": "Function keys F1-F12",
+			"pkeys": "Programmable P1-P5 keys",
+			"media": "Media control keys (play, stop, next, previous)",
+			"numpad": "Numeric keypad",
+			"system": "System keys (print screen, scroll lock, pause, insert, home, page up/down, delete, end)",
+			"windows": "Windows key",
+			"all": "All keys (default color)"
+		}
+	}
 }
