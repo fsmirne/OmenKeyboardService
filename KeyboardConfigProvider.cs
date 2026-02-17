@@ -51,7 +51,6 @@ public sealed class KeyboardConfigProvider
         {
             ProfileName = "Gaming",
             LogLevel = "Warning",
-            Hotkey = null,
             RefreshIntervalSeconds = null,
             KvmMode = false,
             Profile = new Dictionary<string, string>

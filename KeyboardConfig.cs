@@ -13,8 +13,6 @@ public class KeyboardConfig
 
     public string? LogLevel { get; set; }
 
-    public string? Hotkey { get; set; }
-
     public int? RefreshIntervalSeconds { get; set; }
 
     public bool? KvmMode { get; set; }
