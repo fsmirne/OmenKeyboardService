@@ -1,7 +1,6 @@
 [Unit]
 Description=HP Omen Sequencer Keyboard RGB Service
-After=multi-user.target systemd-udev-settle.service
-Wants=systemd-udev-settle.service
+After=multi-user.target
 
 [Service]
 Type=notify

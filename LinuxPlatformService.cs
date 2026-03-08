@@ -211,14 +211,11 @@ public class LinuxPlatformService : PlatformServiceBase
 
             if (!File.Exists(sysfsPath))
             {
-                // Sysfs not yet populated, give it a moment and retry
-                Thread.Sleep(100);
-                if (!File.Exists(sysfsPath))
-                {
-                    // Can't verify, assume it might be our keyboard to be safe
-                    _logger.LogDebug("Cannot read sysfs for {Device}, assuming potential keyboard", deviceName);
-                    return true;
-                }
+                // Sysfs not yet populated — skip this event. The keyboard will
+                // fire another creation event once it is fully initialized, at
+                // which point sysfs will be populated and we can identify it properly.
+                _logger.LogDebug("Cannot read sysfs for {Device}, skipping (will retry on next device event)", deviceName);
+                return false;
             }
 
             var uevent = File.ReadAllText(sysfsPath);

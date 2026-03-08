@@ -57,6 +57,18 @@ public class KeyboardRgbService : BackgroundService
 
         try
         {
+            // Wait for the system to settle before touching the keyboard.
+            // This is especially important at boot when the HID subsystem may
+            // still be initializing. The delay is configurable; if unset no
+            // delay is applied (manual / already-booted starts are unaffected).
+            var startupConfig = await _configProvider.LoadOrCreateDefaultAsync(stoppingToken);
+            int startupDelaySec = startupConfig?.StartupDelaySeconds ?? 0;
+            if (startupDelaySec > 0)
+            {
+                _logger.LogInformation("Startup delay: waiting {Seconds}s for system to settle...", startupDelaySec);
+                await Task.Delay(TimeSpan.FromSeconds(startupDelaySec), stoppingToken);
+            }
+
             // Apply initial configuration
             await ApplyConfigurationAsync();
 
