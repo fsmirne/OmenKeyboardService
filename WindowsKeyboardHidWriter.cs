@@ -20,12 +20,10 @@ public class WindowsKeyboardHidWriter : IKeyboardHidWriter
         var device = OpenKeyboardDevice();
         using var stream = device.Open();
 
+        int maxSize = device.GetMaxOutputReportLength();
+
         foreach (var command in commands)
         {
-            int maxSize = device.GetMaxOutputReportLength();
-            if (maxSize <= 0)
-                throw new InvalidOperationException("Device does not support output reports.");
-
             var buffer = new byte[maxSize];
             buffer[0] = 0; // Report ID
             Array.Copy(command, 0, buffer, 1, Math.Min(command.Length, maxSize - 1));
@@ -50,8 +48,17 @@ public class WindowsKeyboardHidWriter : IKeyboardHidWriter
                 "Please ensure the keyboard is connected and initialized.");
         }
 
-        var device = devices.OrderByDescending(x => x.DevicePath).First();
-        _logger.LogDebug("Selected keyboard device: {DevicePath}", device.DevicePath);
+        // The keyboard exposes multiple HID interfaces (keyboard input, media keys, LED control)
+        // that share the same VID/PID. Select the one that supports output reports (LED control).
+        var device = devices.FirstOrDefault(d => d.GetMaxOutputReportLength() > 0);
+        if (device == null)
+        {
+            throw new InvalidOperationException(
+                $"HP Omen keyboard LED interface not found (VID: 0x{OmenKeyboardConstants.VendorId:X4}, PID: 0x{OmenKeyboardConstants.ProductId:X4}). " +
+                $"Found {devices.Count} device(s) but none support output reports.");
+        }
+
+        _logger.LogDebug("Selected keyboard LED interface: {DevicePath}", device.DevicePath);
 
         return device;
     }

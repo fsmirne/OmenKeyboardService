@@ -237,7 +237,7 @@ public class LinuxPlatformService : PlatformServiceBase
 
     public override void Dispose()
     {
-        _suspendMonitorCts?.Cancel();
+        try { _suspendMonitorCts?.Cancel(); } catch (ObjectDisposedException) { }
         _suspendMonitorCts?.Dispose();
         _sleepWatcher?.Dispose();
         _deviceWatcher?.Dispose();
