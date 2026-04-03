@@ -58,9 +58,8 @@ public class KeyboardRgbService : BackgroundService
         try
         {
             // Wait for the system to settle before touching the keyboard.
-            // This is especially important at boot when the HID subsystem may
-            // still be initializing. The delay is configurable; if unset no
-            // delay is applied (manual / already-booted starts are unaffected).
+            // This prevents 100% CPU usage when the service starts during boot
+            // or while the system is under heavy load (e.g. apt upgrade).
             var startupConfig = await _configProvider.LoadOrCreateDefaultAsync(stoppingToken);
             int startupDelaySec = startupConfig?.StartupDelaySeconds ?? 0;
             if (startupDelaySec > 0)
@@ -68,6 +67,18 @@ public class KeyboardRgbService : BackgroundService
                 _logger.LogInformation("Startup delay: waiting {Seconds}s for system to settle...", startupDelaySec);
                 await Task.Delay(TimeSpan.FromSeconds(startupDelaySec), stoppingToken);
             }
+
+#if LINUX
+            // After the fixed delay, also wait for the system load to drop.
+            // This handles cases the fixed delay can't: apt upgrades, slow boots, etc.
+            int cpuCount = Environment.ProcessorCount;
+            double loadThreshold = Math.Max(cpuCount * 0.7, 1.0);
+            await SystemReadiness.WaitForLowLoadAsync(
+                loadThreshold,
+                TimeSpan.FromSeconds(90),
+                _logger,
+                stoppingToken);
+#endif
 
             // Apply initial configuration
             await ApplyConfigurationAsync();
