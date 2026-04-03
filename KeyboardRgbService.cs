@@ -80,8 +80,9 @@ public class KeyboardRgbService : BackgroundService
                 stoppingToken);
 #endif
 
-            // Apply initial configuration
-            await ApplyConfigurationAsync();
+            // Apply initial configuration — use generous retries since USB/HID
+            // devices may not be ready yet, especially after early boot.
+            await ApplyConfigurationAsync(retryCount: 10);
 
             // Set up file watcher to detect config changes
             SetupConfigWatcher();
@@ -99,6 +100,10 @@ public class KeyboardRgbService : BackgroundService
 
             // Keep the service running
             await Task.Delay(Timeout.Infinite, stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Service stopping...");
         }
         catch (Exception ex)
         {

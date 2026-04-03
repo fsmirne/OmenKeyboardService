@@ -1,7 +1,9 @@
 [Unit]
 Description=HP Omen Sequencer Keyboard RGB Service
-After=graphical.target
-Wants=graphical.target
+After=local-fs.target
+# Prevent tight restart loops during boot — max 3 restarts per 60 seconds
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=notify
@@ -10,10 +12,6 @@ ExecStart=/usr/local/bin/omen-keyboard-rgb/OmenKeyboardService
 WorkingDirectory=/usr/local/bin/omen-keyboard-rgb
 Restart=on-failure
 RestartSec=10s
-# Prevent tight restart loops during boot — max 3 restarts per 60 seconds
-StartLimitIntervalSec=60
-StartLimitBurst=3
-LogLevelMax=warning
 # Give the service generous time to pass the readiness gate before systemd kills it
 TimeoutStartSec=120
 
