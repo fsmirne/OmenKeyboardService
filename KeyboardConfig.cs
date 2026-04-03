@@ -18,12 +18,6 @@ public class KeyboardConfig
     public bool? KvmMode { get; set; }
 
     /// <summary>
-    /// Seconds to wait after service start before applying colors.
-    /// Useful when the service starts at boot before the keyboard is ready.
-    /// </summary>
-    public int? StartupDelaySeconds { get; set; }
-
-    /// <summary>
     /// Validates configuration values and throws if any are invalid
     /// </summary>
     public void Validate()
@@ -31,11 +25,6 @@ public class KeyboardConfig
         if (RefreshIntervalSeconds.HasValue && RefreshIntervalSeconds.Value < 0)
         {
             throw new InvalidOperationException($"RefreshIntervalSeconds must be >= 0, got {RefreshIntervalSeconds.Value}");
-        }
-
-        if (StartupDelaySeconds.HasValue && StartupDelaySeconds.Value < 0)
-        {
-            throw new InvalidOperationException($"StartupDelaySeconds must be >= 0, got {StartupDelaySeconds.Value}");
         }
 
         if (LogLevel != null && !Enum.TryParse<Microsoft.Extensions.Logging.LogLevel>(LogLevel, true, out _))

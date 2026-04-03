@@ -29,6 +29,7 @@ public class LinuxKeyboardHidWriter : IKeyboardHidWriter
             buffer[0] = 0; // Report ID
             Array.Copy(command, 0, buffer, 1, Math.Min(command.Length, HidReportSize - 1));
             fs.Write(buffer);
+            fs.Flush();
         }
     }
 

@@ -57,25 +57,9 @@ public class KeyboardRgbService : BackgroundService
 
         try
         {
-            // Wait for the system to settle before touching the keyboard.
-            // This prevents 100% CPU usage when the service starts during boot
-            // or while the system is under heavy load (e.g. apt upgrade).
-            var startupConfig = await _configProvider.LoadOrCreateDefaultAsync(stoppingToken);
-            int startupDelaySec = startupConfig?.StartupDelaySeconds ?? 0;
-            if (startupDelaySec > 0)
-            {
-                _logger.LogInformation("Startup delay: waiting {Seconds}s for system to settle...", startupDelaySec);
-                await Task.Delay(TimeSpan.FromSeconds(startupDelaySec), stoppingToken);
-            }
-
-            // Wait for the system to be ready (e.g. CPU load settling after boot).
-            // This handles cases the fixed delay can't: apt upgrades, slow boots, etc.
-            await _platformService.WaitForSystemReadyAsync(
-                TimeSpan.FromSeconds(90), _logger, stoppingToken);
-
-            // Apply initial configuration — use generous retries since USB/HID
-            // devices may not be ready yet, especially after early boot.
-            await ApplyConfigurationAsync(retryCount: 10);
+            // Apply initial configuration with retries since USB/HID
+            // devices may not be ready yet at early boot.
+            await ApplyConfigurationAsync(retryCount: 5);
 
             // Set up file watcher to detect config changes
             SetupConfigWatcher();
@@ -321,12 +305,6 @@ public class KeyboardRgbService : BackgroundService
             {
                 _logger.LogInformation("{Reason}. Waiting {DelayMs}ms for device initialization...", e.Reason, e.DelayMs);
                 await Task.Delay(e.DelayMs, stoppingToken);
-
-                // Wait for the system to settle after resume — the USB subsystem
-                // and other services may still be re-initializing, and scanning HID
-                // devices under load causes CPU spikes.
-                await _platformService.WaitForSystemReadyAsync(
-                    TimeSpan.FromSeconds(60), _logger, stoppingToken);
 
                 _logger.LogInformation("Attempting to reapply keyboard colors...");
 

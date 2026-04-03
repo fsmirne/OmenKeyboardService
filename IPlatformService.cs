@@ -17,12 +17,6 @@ public interface IPlatformService : IDisposable
     void Initialize();
 
     /// <summary>
-    /// Waits for the system to be ready for HID device access.
-    /// On Linux, this waits for the CPU load to settle. On Windows, this is a no-op.
-    /// </summary>
-    Task WaitForSystemReadyAsync(TimeSpan timeout, ILogger logger, CancellationToken cancellationToken);
-
-    /// <summary>
     /// Gets the platform name for logging purposes
     /// </summary>
     string PlatformName { get; }

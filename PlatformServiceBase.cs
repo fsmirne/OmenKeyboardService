@@ -25,11 +25,6 @@ public abstract class PlatformServiceBase : IPlatformService
 
     public abstract void Initialize();
 
-    public virtual Task WaitForSystemReadyAsync(TimeSpan timeout, ILogger logger, CancellationToken cancellationToken)
-    {
-        return Task.CompletedTask;
-    }
-
     /// <summary>
     /// Requests a color reapplication with deduplication to prevent rapid successive triggers
     /// </summary>

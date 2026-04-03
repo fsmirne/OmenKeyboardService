@@ -1,7 +1,6 @@
 {
 	"profileName": "Gaming",
 	"logLevel": "Warning",
-	"startupDelaySeconds": 15,
 	"refreshIntervalSeconds": null,
 	"kvmMode": false,
 	"profile": {

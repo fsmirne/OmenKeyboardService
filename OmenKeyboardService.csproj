@@ -9,12 +9,20 @@
     <SelfContained>true</SelfContained>
   </PropertyGroup>
 
+  <!-- Default to the current platform's RID when none is specified -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == '' AND '$(OS)' != 'Windows_NT'">
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == '' AND '$(OS)' == 'Windows_NT'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
   <!-- Define conditional compilation symbols based on target platform -->
-  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(OS)' == 'Windows_NT'">
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
     <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' OR ('$(OS)' != 'Windows_NT' AND '$(RuntimeIdentifier)' == '')">
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
     <DefineConstants>$(DefineConstants);LINUX</DefineConstants>
   </PropertyGroup>
 
@@ -24,7 +32,7 @@
   </ItemGroup>
 
   <!-- Windows-specific packages -->
-  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(OS)' == 'Windows_NT'">
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
     <PackageReference Include="HidSharp" Version="2.1.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.Logging.EventLog" Version="10.0.5" />
@@ -33,7 +41,7 @@
   </ItemGroup>
 
   <!-- Linux-specific packages -->
-  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' OR ('$(OS)' != 'Windows_NT' AND '$(RuntimeIdentifier)' == '')">
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.5" />
   </ItemGroup>
 
@@ -44,14 +52,14 @@
   </ItemGroup>
   
   <!-- Windows-specific scripts -->
-  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(OS)' == 'Windows_NT'">
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
     <None Update="install-service.bat;uninstall-service.bat;start-service.bat;stop-service.bat">
        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 
   <!-- Linux-specific scripts and service file -->
-  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' OR ('$(OS)' != 'Windows_NT' AND '$(RuntimeIdentifier)' == '')">
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
     <None Update="install-service.sh;uninstall-service.sh;start-service.sh;stop-service.sh;omen-keyboard-rgb.service">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
