@@ -68,17 +68,10 @@ public class KeyboardRgbService : BackgroundService
                 await Task.Delay(TimeSpan.FromSeconds(startupDelaySec), stoppingToken);
             }
 
-#if LINUX
-            // After the fixed delay, also wait for the system load to drop.
+            // Wait for the system to be ready (e.g. CPU load settling after boot).
             // This handles cases the fixed delay can't: apt upgrades, slow boots, etc.
-            int cpuCount = Environment.ProcessorCount;
-            double loadThreshold = Math.Max(cpuCount * 0.7, 1.0);
-            await SystemReadiness.WaitForLowLoadAsync(
-                loadThreshold,
-                TimeSpan.FromSeconds(90),
-                _logger,
-                stoppingToken);
-#endif
+            await _platformService.WaitForSystemReadyAsync(
+                TimeSpan.FromSeconds(90), _logger, stoppingToken);
 
             // Apply initial configuration — use generous retries since USB/HID
             // devices may not be ready yet, especially after early boot.
@@ -328,6 +321,12 @@ public class KeyboardRgbService : BackgroundService
             {
                 _logger.LogInformation("{Reason}. Waiting {DelayMs}ms for device initialization...", e.Reason, e.DelayMs);
                 await Task.Delay(e.DelayMs, stoppingToken);
+
+                // Wait for the system to settle after resume — the USB subsystem
+                // and other services may still be re-initializing, and scanning HID
+                // devices under load causes CPU spikes.
+                await _platformService.WaitForSystemReadyAsync(
+                    TimeSpan.FromSeconds(60), _logger, stoppingToken);
 
                 _logger.LogInformation("Attempting to reapply keyboard colors...");
 

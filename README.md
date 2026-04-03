@@ -24,7 +24,7 @@ A cross-platform service that automatically controls the RGB LED colors on HP Om
 
 ### Common Requirements
 - HP Omen keyboard (USB VID: 0x03F0, PID: 0x1F41)
-- .NET 8.0 SDK (for building) or Runtime (for running pre-built binaries)
+- .NET 10 SDK (for building) or Runtime (for running pre-built binaries)
 
 ### Windows Requirements
 - Windows 10/11
@@ -56,7 +56,7 @@ Or manually:
 dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true
 ```
 
-The compiled service will be in: `bin\Release\net8.0\win-x64\publish\`
+The compiled service will be in: `bin\Release\net10.0\win-x64\publish\`
 
 #### Step 2: Copy Files
 
@@ -80,9 +80,9 @@ The service is configured to start automatically at boot and will monitor for po
 
 ### Linux Installation
 
-#### Step 1: Install .NET 8.0 SDK
+#### Step 1: Install .NET 10 SDK
 
-If you don't have .NET 8.0 SDK installed:
+If you don't have .NET 10 SDK installed:
 
 ```bash
 # Ubuntu/Debian
@@ -90,10 +90,10 @@ wget https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-mi
 sudo dpkg -i packages-microsoft-prod.deb
 rm packages-microsoft-prod.deb
 sudo apt-get update
-sudo apt-get install -y dotnet-sdk-8.0
+sudo apt-get install -y dotnet-sdk-10.0
 
 # Fedora
-sudo dnf install dotnet-sdk-8.0
+sudo dnf install dotnet-sdk-10.0
 
 # Arch
 yay -S dotnet-sdk
@@ -104,8 +104,8 @@ For other distributions, see: https://docs.microsoft.com/en-us/dotnet/core/insta
 #### Step 2: Build the Project
 
 ```bash
-chmod +x build-linux.sh
-./build-linux.sh
+chmod +x build.sh
+./build.sh
 ```
 
 Or manually:
@@ -114,14 +114,14 @@ Or manually:
 dotnet publish -c Release -r linux-x64 --self-contained true /p:PublishSingleFile=true
 ```
 
-The compiled service will be in: `bin/Release/net8.0/linux-x64/publish/`
+The compiled service will be in: `bin/Release/net10.0/linux-x64/publish/`
 
 #### Step 3: Install the Service
 
 Navigate to the publish directory and run the install script:
 
 ```bash
-cd bin/Release/net8.0/linux-x64/publish/
+cd bin/Release/net10.0/linux-x64/publish/
 chmod +x install-service.sh
 sudo ./install-service.sh
 ```

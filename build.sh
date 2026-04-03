@@ -11,7 +11,7 @@ echo ""
 
 # Check if dotnet is installed
 if ! command -v dotnet &> /dev/null; then
-    echo "ERROR: .NET SDK not found. Please install .NET 8.0 SDK first."
+    echo "ERROR: .NET SDK not found. Please install .NET 10 SDK first."
     echo "Visit: https://docs.microsoft.com/en-us/dotnet/core/install/linux"
     exit 1
 fi
@@ -19,7 +19,7 @@ fi
 echo "Building project for Linux x64..."
 dotnet publish -c Release -r linux-x64 --self-contained true /p:PublishSingleFile=true
 
-PUBLISH_DIR="bin/Release/net8.0/linux-x64/publish"
+PUBLISH_DIR="bin/Release/net10.0/linux-x64/publish"
 
 if [ -d "$PUBLISH_DIR" ]; then
     echo ""

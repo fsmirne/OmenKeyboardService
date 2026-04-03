@@ -18,6 +18,13 @@ public class LinuxPlatformService : PlatformServiceBase
 
     public LinuxPlatformService(ILogger<LinuxPlatformService> logger) : base(logger) { }
 
+    public override async Task WaitForSystemReadyAsync(TimeSpan timeout, ILogger logger, CancellationToken cancellationToken)
+    {
+        int cpuCount = Environment.ProcessorCount;
+        double loadThreshold = Math.Max(cpuCount * 0.7, 1.0);
+        await SystemReadiness.WaitForLowLoadAsync(loadThreshold, timeout, logger, cancellationToken);
+    }
+
     public override void Initialize()
     {
         _logger.LogInformation("Initializing Linux platform services...");

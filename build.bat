@@ -8,7 +8,7 @@ REM Check if dotnet is installed
 dotnet --version >nul 2>&1
 if %errorLevel% neq 0 (
     echo ERROR: .NET SDK is not installed!
-    echo Please download and install .NET 8.0 SDK from:
+    echo Please download and install .NET 10 SDK from:
     echo https://dotnet.microsoft.com/download
     pause
     exit /b 1
@@ -32,7 +32,7 @@ echo Build completed successfully!
 echo ============================================
 echo.
 echo Output location:
-echo bin\Release\net8.0\win-x64\publish\
+echo bin\Release\net10.0\win-x64\publish\
 echo.
 echo Next steps:
 echo 1. Copy the contents of the publish folder to a permanent location
