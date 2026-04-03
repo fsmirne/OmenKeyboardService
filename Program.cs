@@ -68,17 +68,19 @@ else if (isLinux)
 #endif
 }
 
-// Register platform-specific service implementation
+// Register platform-specific service implementations
 if (isWindows)
 {
 #if WINDOWS
     builder.Services.AddSingleton<IPlatformService, WindowsPlatformService>();
+    builder.Services.AddSingleton<IKeyboardHidWriter, WindowsKeyboardHidWriter>();
 #endif
 }
 else if (isLinux)
 {
 #if LINUX
     builder.Services.AddSingleton<IPlatformService, LinuxPlatformService>();
+    builder.Services.AddSingleton<IKeyboardHidWriter, LinuxKeyboardHidWriter>();
 #endif
 }
 else

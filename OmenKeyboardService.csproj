@@ -19,13 +19,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="HidSharp" Version="2.1.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.5" />
   </ItemGroup>
 
   <!-- Windows-specific packages -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(OS)' == 'Windows_NT'">
+    <PackageReference Include="HidSharp" Version="2.1.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.Logging.EventLog" Version="10.0.5" />
     <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.5" />

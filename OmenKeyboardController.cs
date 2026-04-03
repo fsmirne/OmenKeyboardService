@@ -1,14 +1,13 @@
-using HidSharp;
-
 namespace OmenKeyboardService;
 
 /// <summary>
 /// Controller for HP Omen keyboard RGB LED control
-/// Ported from Sequencer.linq - sends HID commands to control individual key colors
+/// Builds HID command packets and delegates device I/O to IKeyboardHidWriter
 /// </summary>
 public class OmenKeyboardController
 {
     private readonly ILogger<OmenKeyboardController> _logger;
+    private readonly IKeyboardHidWriter _hidWriter;
 
     // HID protocol headers - magic bytes that the keyboard firmware expects
     // HEADER0 is the initialization command sent before any color data
@@ -33,41 +32,26 @@ public class OmenKeyboardController
     private const string BODY1 = "ffff0000ffffffffffffffff00ffff00ffff0000ffffffffff00ffffffffff00ffff0000ffffffffff00ffffff00ff00ffff0000ffffffffffffffff";
     private const string BODY2 = "ffffff00ffff0000ffffffffffffffffffff0000ffff0000000000000000000000000000000000000000000000000000000000000000000000000000";
 
-
-    public OmenKeyboardController(ILogger<OmenKeyboardController> logger)
+    public OmenKeyboardController(ILogger<OmenKeyboardController> logger, IKeyboardHidWriter hidWriter)
     {
         _logger = logger;
+        _hidWriter = hidWriter;
     }
 
     /// <summary>
     /// Applies color settings to the keyboard based on key group mappings
     /// </summary>
-    /// <param name="colorOverrides">Dictionary mapping key/group names to RGB color values</param>
     public void ApplyColors(Dictionary<string, uint> colorOverrides)
     {
         try
         {
             _logger.LogInformation("Applying colors to keyboard...");
 
-            // Get the keyboard layout
             var (keys, groups) = GetKeyboardLayout();
-
-            // Expand group names to individual keys
             var expandedOverrides = ExpandGroupsToKeys(colorOverrides, groups);
-
-            // Build the HID command table
             var commandTable = BuildCommandTable(keys, expandedOverrides);
 
-            // Open the keyboard device
-            var device = OpenKeyboardDevice();
-
-            using var stream = device.Open();
-
-            // Send each command to the keyboard
-            foreach (var command in commandTable)
-            {
-                WriteHidCommand(device, stream, command.ToArray());
-            }
+            _hidWriter.WriteCommands(commandTable);
 
             _logger.LogInformation("Colors applied successfully");
         }
@@ -79,51 +63,6 @@ public class OmenKeyboardController
     }
 
     /// <summary>
-    /// Opens the HP Omen keyboard HID device
-    /// </summary>
-    private HidDevice OpenKeyboardDevice()
-    {
-        var deviceList = DeviceList.Local;
-        var devices = deviceList.GetHidDevices(OmenKeyboardConstants.VendorId, OmenKeyboardConstants.ProductId).ToList();
-
-        _logger.LogDebug("Searching for HP Omen keyboard (VID: 0x{VendorId:X4}, PID: 0x{ProductId:X4})...", OmenKeyboardConstants.VendorId, OmenKeyboardConstants.ProductId);
-        _logger.LogDebug("Found {Count} matching HID device(s)", devices.Count);
-
-        if (!devices.Any())
-        {
-            _logger.LogWarning("HP Omen keyboard not found. Keyboard may not be connected or may still be initializing.");
-            throw new InvalidOperationException($"HP Omen keyboard not found (VID: 0x{OmenKeyboardConstants.VendorId:X4}, PID: 0x{OmenKeyboardConstants.ProductId:X4}). Please ensure the keyboard is connected and initialized.");
-        }
-
-        // Select the device with the longest path (most specific interface)
-        var device = devices.OrderByDescending(x => x.DevicePath).First();
-        _logger.LogDebug("Selected keyboard device: {DevicePath}", device.DevicePath);
-
-        return device;
-    }
-
-    /// <summary>
-    /// Writes a HID command to the keyboard device
-    /// </summary>
-    private static void WriteHidCommand(HidDevice device, HidStream stream, byte[] command)
-    {
-        int maxSize = device.GetMaxOutputReportLength();
-        if (maxSize <= 0)
-        {
-            throw new InvalidOperationException("Device does not support output reports.");
-        }
-
-        // Prepare buffer with report ID at position 0
-        var buffer = new byte[maxSize];
-        buffer[0] = 0; // Report ID (always 0 for this device)
-
-        // Copy the command data starting at position 1
-        Array.Copy(command, 0, buffer, 1, Math.Min(command.Length, maxSize - 1));
-
-        stream.Write(buffer);
-    }
-
-    /// <summary>
     /// Expands group names to individual key mappings
     /// </summary>
     private static Dictionary<string, uint> ExpandGroupsToKeys(Dictionary<string, uint> colorOverrides, Dictionary<string, List<string>> groups)
@@ -131,12 +70,10 @@ public class OmenKeyboardController
         return colorOverrides
             .SelectMany(kvp =>
             {
-                // If it's a group, expand to all keys in that group
                 if (groups.ContainsKey(kvp.Key))
                 {
                     return groups[kvp.Key].Select(key => new { Key = key, Color = kvp.Value });
                 }
-                // Otherwise, it's a single key
                 else
                 {
                     return [new { Key = kvp.Key, Color = kvp.Value }];
@@ -148,11 +85,9 @@ public class OmenKeyboardController
     /// <summary>
     /// Builds the HID command table with RGB color data for all keys
     /// </summary>
-    private static List<List<byte>> BuildCommandTable(List<string> keys, Dictionary<string, uint> overrides)
+    private static byte[][] BuildCommandTable(List<string> keys, Dictionary<string, uint> overrides)
     {
-        // Define the 9 command line structures
-        // Each tuple contains: (header, body template, bit offset for color component)
-        var lines = new List<(string header, string body, int offset)>
+        var lines = new (string header, string body, int offset)[]
         {
             (HEADER1, BODY0, 16),  // Keys 0-59, Red
             (HEADER2, BODY1, 16),  // Keys 60-119, Red
@@ -167,57 +102,40 @@ public class OmenKeyboardController
 
         const uint DEFAULT_COLOR = 0xFFFFFF; // White
 
-        // Start with the initialization header
-        var result = new List<List<byte>>
-        {
-            new(DecodeHex(HEADER0))
-        };
+        var result = new List<byte[]> { DecodeHex(HEADER0) };
 
-        // Build each of the 9 command lines
-        var commandLines = lines.Select((line, lineIndex) =>
+        for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
         {
-            var (header, body, offset) = line;
-
-            // Start with the decoded header bytes
+            var (header, body, offset) = lines[lineIndex];
             var commandBytes = new List<byte>(DecodeHex(header));
 
-            // Process the body template to add color data
             var bodyBytes = Enumerable.Range(0, body.Length / 2)
                 .Select(byteIndex =>
                 {
-                    // Check if this slot is active ('ff') or padding ('00')
                     if (body[byteIndex * 2] == '0')
                         return (byte)0;
 
-                    // Calculate which key this byte position represents
                     int keyIndex = (lineIndex % 3) * 60 + byteIndex;
 
-                    // Get the key name from the layout
                     string? keyName = keyIndex < keys.Count ? keys[keyIndex] : null;
 
-                    // Determine the color for this key
                     uint color = keyName != null && overrides.ContainsKey(keyName)
                         ? overrides[keyName]
                         : overrides.ContainsKey("all")
                             ? overrides["all"]
                             : DEFAULT_COLOR;
 
-                    // Extract the appropriate color component (R, G, or B)
                     byte component = (byte)((color >> offset) & 0xFF);
                     return component;
                 });
 
             commandBytes.AddRange(bodyBytes);
-            return commandBytes;
-        });
+            result.Add(commandBytes.ToArray());
+        }
 
-        result.AddRange(commandLines);
-        return result;
+        return result.ToArray();
     }
 
-    /// <summary>
-    /// Converts a hex string to a byte array
-    /// </summary>
     private static byte[] DecodeHex(string hexString)
     {
         return Enumerable.Range(0, hexString.Length / 2)
@@ -225,17 +143,11 @@ public class OmenKeyboardController
             .ToArray();
     }
 
-    /// <summary>
-    /// Gets the keyboard layout configuration
-    /// </summary>
     private (List<string> keys, Dictionary<string, List<string>> groups) GetKeyboardLayout()
     {
         return (GetKeys(), GetKeyGroups());
     }
 
-    /// <summary>
-    /// Returns the complete keyboard layout mapping
-    /// </summary>
     private static List<string> GetKeys()
     {
         return
@@ -278,9 +190,6 @@ public class OmenKeyboardController
         ];
     }
 
-    /// <summary>
-    /// Defines convenient key groups for bulk color assignment
-    /// </summary>
     private Dictionary<string, List<string>> GetKeyGroups()
     {
         return new Dictionary<string, List<string>>
