@@ -31,13 +31,6 @@ echo ============================================
 echo Build completed successfully!
 echo ============================================
 echo.
-echo Output location:
-echo bin\Release\net10.0\win-x64\publish\
-echo.
-echo Next steps:
-echo 1. Copy the contents of the publish folder to a permanent location
-echo    (e.g., C:\Program Files\OmenKeyboardService\)
-echo 2. Copy install-service.bat to the same location
-echo 3. Run install-service.bat as Administrator
+echo Next step: Run install-service.bat as Administrator
 echo.
 pause

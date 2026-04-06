@@ -24,6 +24,14 @@ if %errorLevel% neq 0 (
     exit /b 0
 )
 
+REM Get the install directory from the registered service binary path
+set INSTALL_DIR=
+for /f "tokens=3*" %%a in ('sc qc %SERVICE_NAME% ^| findstr "BINARY_PATH_NAME"') do set "INSTALL_DIR=%%a %%b"
+REM Strip the executable filename to get the directory
+for %%f in ("%INSTALL_DIR%") do set "INSTALL_DIR=%%~dpf"
+REM Strip trailing backslash
+if "%INSTALL_DIR:~-1%"=="\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
+
 REM Stop the service
 echo Stopping service...
 sc stop %SERVICE_NAME%
@@ -37,6 +45,12 @@ if %errorLevel% neq 0 (
     echo ERROR: Failed to delete service!
     pause
     exit /b 1
+)
+
+REM Remove install directory
+if defined INSTALL_DIR if exist "%INSTALL_DIR%" (
+    echo Removing %INSTALL_DIR%...
+    rmdir /S /Q "%INSTALL_DIR%"
 )
 
 echo.
