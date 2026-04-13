@@ -23,11 +23,13 @@ public class WindowsKeyboardHidWriter : IKeyboardHidWriter
         var device = FindKeyboardDevice();
         using var stream = device.Open();
 
+        int maxSize = device.GetMaxOutputReportLength();
+
         foreach (var command in commands)
         {
-            var buffer = new byte[65];
+            var buffer = new byte[maxSize];
             buffer[0] = 0; // Report ID 0 (LED)
-            Array.Copy(command, 0, buffer, 1, Math.Min(command.Length, 64));
+            Array.Copy(command, 0, buffer, 1, Math.Min(command.Length, maxSize - 1));
             stream.Write(buffer);
         }
     }
