@@ -1,6 +1,6 @@
-# HP Omen Sequencer Keyboard RGB Service
+# HP Omen Sequencer Keyboard RGB & Macro Service
 
-A cross-platform service that automatically controls the RGB LED colors on HP Omen keyboards. The service runs at system startup and applies custom color profiles based on a simple JSON configuration file.
+A cross-platform service that controls RGB LED colors and programmable macro keys on HP Omen Sequencer keyboards. The service runs at system startup and applies custom color profiles and macro key assignments based on a simple JSON configuration file.
 
 **Supported Platforms:**
 - ✅ Windows 10/11 (Windows Service)
@@ -8,14 +8,16 @@ A cross-platform service that automatically controls the RGB LED colors on HP Om
 
 ## Features
 
+- **RGB LED Control**: Full per-key RGB color control with key groups and individual key targeting
+- **Programmable Macro Keys**: Program P1-P5 and FN+P1-FN+P5 with key combos, sequences, and delays
 - **Automatic Startup**: Runs as a system service (Windows Service or systemd) that starts when the OS boots
 - **Cross-Platform**: Single codebase works on both Windows and Linux
 - **USB Reconnection**: Automatically detects keyboard reconnection and restores colors when using KVM switches or replug events
 - **Platform-Specific Features**:
   - **Windows**: Power management (sleep/wake), session lock/unlock detection, display power monitoring, user presence detection, WMI device monitoring
   - **Linux**: Power management (suspend/resume), device monitoring via /dev filesystem with smart keyboard detection
-- **JSON Configuration**: Easy-to-edit configuration file for color profiles
-- **Hot Reload**: Automatically detects config file changes and applies new colors
+- **JSON Configuration**: Easy-to-edit configuration file for color profiles and macro assignments
+- **Hot Reload**: Automatically detects config file changes and applies new colors and macros
 - **Key Groups**: Control multiple keys at once (WASD, arrows, function keys, etc.)
 - **Individual Keys**: Set colors for specific keys
 - **Multiple Profiles**: Easily switch between different color schemes
@@ -247,9 +249,101 @@ You can also set colors for individual keys:
 }
 ```
 
+### Macro Key Configuration
+
+The keyboard has 5 programmable P-keys (P1-P5) plus an FN layer (FN+P1 through FN+P5), giving you 10 programmable slots. Add a `macros` section to `config.json` to program them:
+
+#### Single Key
+
+```json
+{
+  "macros": {
+    "p1": { "keys": "a" },
+    "p2": { "keys": "f5" }
+  }
+}
+```
+
+#### Key Combo
+
+```json
+{
+  "macros": {
+    "p1": { "keys": "ctrl+c" },
+    "p2": { "keys": "ctrl+v" },
+    "p3": { "keys": "ctrl+shift+t" },
+    "p4": { "keys": "alt+tab" }
+  }
+}
+```
+
+#### Multi-Step Sequence with Delays
+
+```json
+{
+  "macros": {
+    "p1": {
+      "sequence": [
+        { "keys": "ctrl+a", "delayMs": 50 },
+        { "keys": "ctrl+c" }
+      ]
+    }
+  }
+}
+```
+
+#### FN Layer
+
+```json
+{
+  "macros": {
+    "p1": { "keys": "ctrl+c" },
+    "fn+p1": { "keys": "ctrl+z" }
+  }
+}
+```
+
+#### Available Macro Keys
+
+| Key | Description |
+|-----|-------------|
+| `p1` - `p5` | Programmable keys P1 through P5 |
+| `fn+p1` - `fn+p5` | FN layer for P1 through P5 |
+
+#### Available Key Names
+
+**Modifiers:** `ctrl`, `shift`, `alt`, `win`, `rctrl`, `rshift`, `ralt`/`altgr`, `rwin`
+
+**Letters:** `a`-`z`
+
+**Numbers:** `0`-`9`
+
+**Function keys:** `f1`-`f24`
+
+**Navigation:** `insert`, `home`, `pageup`/`pgup`, `delete`/`del`, `end`, `pagedown`/`pgdn`
+
+**Arrows:** `up`, `down`, `left`, `right`
+
+**Editing:** `enter`, `esc`, `backspace`, `tab`, `space`
+
+**Symbols:** `-`, `=`, `[`, `]`, `\`, `;`, `'`, `` ` ``, `,`, `.`, `/`
+
+**Numpad:** `numpad0`-`numpad9`, `numpad+`, `numpad-`, `numpad*`, `numpad/`, `numpadenter`, `numpad.`
+
+**Other:** `capslock`, `printscreen`, `scrolllock`, `pause`, `numlock`, `menu`
+
+#### How Macros Work
+
+Macros are stored directly on the keyboard's MCU (microcontroller). When you press a P-key, the MCU executes the programmed macro without any software running on the host. Macros persist across power cycles and work on any computer the keyboard is connected to.
+
+The service reprograms the macro keys whenever:
+- The service starts
+- `config.json` is saved with changes
+- The keyboard is reconnected (KVM switch, USB replug)
+
 ### Applying Changes
 
-Just save `config.json` - the service automatically detects changes and applies the new colors within 1 second. No need to restart the service!
+Just save `config.json` - the service automatically detects changes and applies new colors and macros within 1 second. No need to restart the service!
 
 ## Service Management
 
@@ -540,8 +634,8 @@ sudo udevadm trigger
 
 The service uses a cross-platform architecture with platform-specific implementations:
 
-- **Common Code**: `KeyboardRgbService`, `OmenKeyboardController`, HID communication
-- **Platform Abstraction**: `IPlatformService` interface
+- **Common Code**: `KeyboardRgbService`, `OmenKeyboardController` (RGB), `OmenMacroController` (macros), `HidKeyCodes` (key mapping)
+- **Platform Abstraction**: `IPlatformService` interface, `IKeyboardHidWriter` interface
 - **Windows Implementation**: `WindowsPlatformService` - WMI device monitoring, power events (sleep/wake), session events (lock/unlock/logon), display power notifications, user presence detection
 - **Linux Implementation**: `LinuxPlatformService` - /dev filesystem monitoring with keyboard-specific filtering, suspend/resume detection via sysfs wakeup_count monitoring
 
@@ -560,11 +654,13 @@ The service uses a cross-platform architecture with platform-specific implementa
 
 ### HID Protocol
 
-The service uses the HID (Human Interface Device) protocol to communicate with the keyboard:
-- Vendor ID: 0x03F0 (HP)
-- Product ID: 0x1F41 (Omen keyboard)
-- Commands are sent as 64-byte HID output reports
-- RGB data is split across 9 command packets (3 per color channel)
+The service communicates with the keyboard via HID output reports on the vendor-specific interface (MI_02, usage page 0xFF13):
+
+- **Vendor ID**: 0x03F0 (HP)
+- **Product ID**: 0x1F41 (Omen Sequencer)
+- **Report size**: 64 bytes + 1 byte Report ID
+- **LED commands**: Report ID 0 — RGB data split across 9 command packets (3 per color channel)
+- **Macro commands**: Report ID 1 — uses the "Woodstock" protocol (HP's McuSDK). Each macro write requires a clear-then-write sequence with a length command (BLength_low=4, includes loop count) followed by data chunks
 
 ### Logging
 
@@ -633,9 +729,9 @@ Look for these messages in the logs (both platforms):
 
 ## Credits
 
-Based on the Rust library [lights-for-omen-sequencer](https://github.com/slysherz/lights-for-omen-sequencer)
+RGB LED protocol based on the Rust library [lights-for-omen-sequencer](https://github.com/slysherz/lights-for-omen-sequencer). Originally ported to C# as Sequencer.linq, then converted to a cross-platform service.
 
-Originally ported to C# as Sequencer.linq, then converted to a Windows service.
+Macro key protocol reverse-engineered from HP's Omen Gaming Hub DLLs (McuSDK.dll, HIDSDK.dll, AccessoryMacroBg.dll) via ILSpy decompilation.
 
 ## License
 
