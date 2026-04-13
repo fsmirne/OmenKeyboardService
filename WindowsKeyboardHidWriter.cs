@@ -4,15 +4,13 @@ using HidSharp;
 namespace OmenKeyboardService;
 
 /// <summary>
-/// Writes HID commands to the keyboard via HidSharp (Windows HID API wrapper)
+/// Writes HID commands to the keyboard via HidSharp (Windows HID API wrapper).
+/// LED commands use Report ID 0, macro commands use Report ID 1.
 /// </summary>
 public class WindowsKeyboardHidWriter : IKeyboardHidWriter
 {
     private readonly ILogger<WindowsKeyboardHidWriter> _logger;
 
-    // The vendor-specific usage page in the HID report descriptor that identifies
-    // the LED control interface (as opposed to keyboard input or media key interfaces).
-    // Byte sequence: 0x06 (Usage Page, 2-byte), 0x13, 0xFF → Usage Page 0xFF13.
     private static readonly byte[] VendorUsagePage = [0x06, 0x13, 0xFF];
 
     public WindowsKeyboardHidWriter(ILogger<WindowsKeyboardHidWriter> logger)
@@ -22,50 +20,59 @@ public class WindowsKeyboardHidWriter : IKeyboardHidWriter
 
     public void WriteCommands(byte[][] commands)
     {
-        var device = OpenKeyboardDevice();
+        var device = FindKeyboardDevice();
         using var stream = device.Open();
-
-        int maxSize = device.GetMaxOutputReportLength();
 
         foreach (var command in commands)
         {
-            var buffer = new byte[maxSize];
-            buffer[0] = 0; // Report ID
-            Array.Copy(command, 0, buffer, 1, Math.Min(command.Length, maxSize - 1));
-
+            var buffer = new byte[65];
+            buffer[0] = 0; // Report ID 0 (LED)
+            Array.Copy(command, 0, buffer, 1, Math.Min(command.Length, 64));
             stream.Write(buffer);
         }
     }
 
-    private HidDevice OpenKeyboardDevice()
+    public byte[][] WriteAndReadAll(byte[][] commands, byte reportId = 0, int readTimeoutMs = 2000)
     {
-        var deviceList = DeviceList.Local;
-        var devices = deviceList.GetHidDevices(OmenKeyboardConstants.VendorId, OmenKeyboardConstants.ProductId).ToList();
+        var device = FindKeyboardDevice();
+        using var stream = device.Open();
+        stream.ReadTimeout = readTimeoutMs;
 
-        _logger.LogDebug("Searching for HP Omen keyboard (VID: 0x{VendorId:X4}, PID: 0x{ProductId:X4})...",
-            OmenKeyboardConstants.VendorId, OmenKeyboardConstants.ProductId);
-        _logger.LogDebug("Found {Count} matching HID device(s)", devices.Count);
+        var responses = new byte[commands.Length][];
+
+        for (int i = 0; i < commands.Length; i++)
+        {
+            var buffer = new byte[65];
+            buffer[0] = reportId;
+            Array.Copy(commands[i], 0, buffer, 1, Math.Min(commands[i].Length, 64));
+
+            stream.Write(buffer);
+            Thread.Sleep(200);
+
+            var response = new byte[65];
+            int bytesRead = stream.Read(response);
+
+            var result = new byte[64];
+            Array.Copy(response, 1, result, 0, Math.Min(bytesRead - 1, 64));
+            responses[i] = result;
+        }
+
+        return responses;
+    }
+
+    private HidDevice FindKeyboardDevice()
+    {
+        var devices = DeviceList.Local.GetHidDevices(OmenKeyboardConstants.VendorId, OmenKeyboardConstants.ProductId).ToList();
+
+        _logger.LogDebug("Searching for HP Omen keyboard (VID: 0x{VendorId:X4}, PID: 0x{ProductId:X4})...", OmenKeyboardConstants.VendorId, OmenKeyboardConstants.ProductId);
 
         if (!devices.Any())
-        {
-            throw new InvalidOperationException(
-                $"HP Omen keyboard not found (VID: 0x{OmenKeyboardConstants.VendorId:X4}, PID: 0x{OmenKeyboardConstants.ProductId:X4}). " +
-                "Please ensure the keyboard is connected and initialized.");
-        }
+            throw new InvalidOperationException($"HP Omen keyboard not found (VID: 0x{OmenKeyboardConstants.VendorId:X4}, PID: 0x{OmenKeyboardConstants.ProductId:X4}). Please ensure the keyboard is connected and initialized.");
 
-        // The keyboard exposes multiple HID interfaces (keyboard input, media keys, LED control)
-        // that share the same VID/PID. Identify the LED control interface by its vendor-specific
-        // HID report descriptor (usage page 0xFF13), same approach as the Linux hidraw path.
-        var device = devices.FirstOrDefault(d => d.GetRawReportDescriptor().AsSpan().IndexOf(VendorUsagePage) >= 0);
-        if (device == null)
-        {
-            throw new InvalidOperationException(
-                $"HP Omen keyboard LED interface not found (VID: 0x{OmenKeyboardConstants.VendorId:X4}, PID: 0x{OmenKeyboardConstants.ProductId:X4}). " +
-                $"Found {devices.Count} device(s) but none have the expected vendor usage page (0xFF13).");
-        }
+        var device = devices.FirstOrDefault(d => d.GetRawReportDescriptor().AsSpan().IndexOf(VendorUsagePage) >= 0)
+            ?? throw new InvalidOperationException($"HP Omen keyboard vendor interface not found (usage page 0xFF13). Found {devices.Count} device(s) but none match.");
 
-        _logger.LogDebug("Selected keyboard LED interface: {DevicePath}", device.DevicePath);
-
+        _logger.LogDebug("Selected keyboard interface: {DevicePath}", device.DevicePath);
         return device;
     }
 }

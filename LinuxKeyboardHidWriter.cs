@@ -3,14 +3,15 @@ namespace OmenKeyboardService;
 
 /// <summary>
 /// Writes HID commands to the keyboard via raw /dev/hidraw access.
-/// Opens the device, writes all commands, and closes it — no persistent monitoring thread.
+/// LED commands use Report ID 0, macro commands use Report ID 1.
 /// </summary>
 public class LinuxKeyboardHidWriter : IKeyboardHidWriter
 {
     private readonly ILogger<LinuxKeyboardHidWriter> _logger;
 
-    // Report ID (0) + 64 bytes of command data
-    private const int HidReportSize = 65;
+    private const int HidReportSize = 65; // Report ID (1 byte) + 64 bytes of command data
+
+    private static readonly byte[] VendorUsagePage = [0x06, 0x13, 0xFF];
 
     public LinuxKeyboardHidWriter(ILogger<LinuxKeyboardHidWriter> logger)
     {
@@ -26,23 +27,46 @@ public class LinuxKeyboardHidWriter : IKeyboardHidWriter
         foreach (var command in commands)
         {
             var buffer = new byte[HidReportSize];
-            buffer[0] = 0; // Report ID
+            buffer[0] = 0; // Report ID 0 (LED)
             Array.Copy(command, 0, buffer, 1, Math.Min(command.Length, HidReportSize - 1));
             fs.Write(buffer);
             fs.Flush();
         }
     }
 
-    // The vendor-specific usage page in the HID report descriptor that identifies
-    // the LED control interface (as opposed to keyboard input or media key interfaces).
-    // Byte sequence: 0x06 (Usage Page, 2-byte), 0x13, 0xFF → Usage Page 0xFF13.
-    private static readonly byte[] VendorUsagePage = [0x06, 0x13, 0xFF];
+    public byte[][] WriteAndReadAll(byte[][] commands, byte reportId = 0, int readTimeoutMs = 2000)
+    {
+        var devicePath = FindKeyboardHidrawPath();
 
-    /// <summary>
-    /// Finds the hidraw device path for the HP Omen keyboard's LED control interface by scanning sysfs.
-    /// The keyboard exposes multiple HID interfaces (keyboard input, media keys, LED control) that all
-    /// share the same VID/PID. We identify the correct one by its vendor-specific HID report descriptor.
-    /// </summary>
+        using var fs = new FileStream(devicePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+
+        var responses = new byte[commands.Length][];
+
+        for (int i = 0; i < commands.Length; i++)
+        {
+            var buffer = new byte[HidReportSize];
+            buffer[0] = reportId;
+            Array.Copy(commands[i], 0, buffer, 1, Math.Min(commands[i].Length, HidReportSize - 1));
+            fs.Write(buffer);
+            fs.Flush();
+
+            Thread.Sleep(200);
+
+            // hidraw reads are blocking — use a cancellation timeout to avoid hanging
+            var response = new byte[HidReportSize];
+            var readTask = Task.Run(() => fs.Read(response, 0, response.Length));
+            if (!readTask.Wait(TimeSpan.FromSeconds(3)))
+                throw new TimeoutException("HID read timed out — MCU did not respond within 3 seconds");
+            int bytesRead = readTask.Result;
+
+            var result = new byte[64];
+            Array.Copy(response, 1, result, 0, Math.Min(bytesRead - 1, 64));
+            responses[i] = result;
+        }
+
+        return responses;
+    }
+
     private string FindKeyboardHidrawPath()
     {
         var vendorHex = OmenKeyboardConstants.VendorId.ToString("X4");
@@ -61,13 +85,9 @@ public class LinuxKeyboardHidWriter : IKeyboardHidWriter
             try
             {
                 var uevent = File.ReadAllText(ueventPath);
-                // HID_ID line format: HID_ID=0003:000003F0:00001F41
-                if (!uevent.Contains(vendorHex, StringComparison.OrdinalIgnoreCase) ||
-                    !uevent.Contains(productHex, StringComparison.OrdinalIgnoreCase))
+                if (!uevent.Contains(vendorHex, StringComparison.OrdinalIgnoreCase) || !uevent.Contains(productHex, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                // Multiple interfaces share the same VID/PID. Check the report descriptor
-                // to find the vendor-specific interface used for LED control.
                 var descriptorPath = Path.Combine(hidrawDir, "device", "report_descriptor");
                 if (!HasVendorUsagePage(descriptorPath))
                 {
@@ -90,17 +110,13 @@ public class LinuxKeyboardHidWriter : IKeyboardHidWriter
             }
         }
 
-        throw new InvalidOperationException(
-            $"HP Omen keyboard LED interface not found (VID: 0x{vendorHex}, PID: 0x{productHex}). " +
-            "Please ensure the keyboard is connected and initialized.");
+        throw new InvalidOperationException($"HP Omen keyboard LED interface not found (VID: 0x{vendorHex}, PID: 0x{productHex}). Please ensure the keyboard is connected and initialized.");
     }
 
     private bool HasVendorUsagePage(string reportDescriptorPath)
     {
         try
         {
-            // sysfs files report a fixed block size (4096) via fstat regardless of actual content,
-            // which causes File.ReadAllBytes to throw EndOfStreamException. Read manually instead.
             using var fs = new FileStream(reportDescriptorPath, FileMode.Open, FileAccess.Read, FileShare.Read);
             var buffer = new byte[4096];
             int bytesRead = fs.Read(buffer, 0, buffer.Length);

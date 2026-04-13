@@ -10,6 +10,7 @@ public class KeyboardRgbService : BackgroundService
 {
     private readonly ILogger<KeyboardRgbService> _logger;
     private readonly OmenKeyboardController _keyboardController;
+    private readonly OmenMacroController _macroController;
     private readonly IPlatformService _platformService;
     private readonly KeyboardConfigProvider _configProvider;
     private readonly string _configPath;
@@ -37,11 +38,13 @@ public class KeyboardRgbService : BackgroundService
     public KeyboardRgbService(
         ILogger<KeyboardRgbService> logger,
         OmenKeyboardController keyboardController,
+        OmenMacroController macroController,
         IPlatformService platformService,
         KeyboardConfigProvider configProvider)
     {
         _logger = logger;
         _keyboardController = keyboardController;
+        _macroController = macroController;
         _platformService = platformService;
         _configProvider = configProvider;
 
@@ -121,6 +124,19 @@ public class KeyboardRgbService : BackgroundService
             await ApplyColorsWithRetry(colorMap, retryCount);
 
             _logger.LogInformation("Successfully applied colors to keyboard. Groups configured: {Count}", colorMap.Count);
+
+            // Apply macro key assignments (uses HID Report ID 1, separate from LED Report ID 0)
+            if (config.Macros is { Count: > 0 })
+            {
+                try
+                {
+                    _macroController.ApplyMacros(config.Macros);
+                }
+                catch (Exception macroEx)
+                {
+                    _logger.LogError(macroEx, "Failed to apply macro key assignments (RGB colors were applied successfully)");
+                }
+            }
         }
         catch (Exception ex)
         {

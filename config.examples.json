@@ -114,6 +114,35 @@
 			}
 		}
 	},
+	"macroExamples": {
+		"Copy/Paste Shortcuts": {
+			"macros": {
+				"p1": { "keys": "ctrl+c" },
+				"p2": { "keys": "ctrl+v" },
+				"p3": { "keys": "ctrl+x" },
+				"p4": { "keys": "ctrl+z" },
+				"p5": { "keys": "ctrl+y" }
+			}
+		},
+		"Multi-step Sequence": {
+			"macros": {
+				"p1": {
+					"sequence": [
+						{ "keys": "ctrl+a", "delayMs": 50 },
+						{ "keys": "ctrl+c" }
+					]
+				}
+			}
+		},
+		"Mixed Keys and FN Layer": {
+			"macros": {
+				"p1": { "keys": "alt+tab" },
+				"p2": { "keys": "ctrl+shift+t" },
+				"fn+p1": { "keys": "f5" },
+				"fn+p2": { "keys": "ctrl+shift+i" }
+			}
+		}
+	},
 	"usage": {
 		"instructions": ["Copy one of the example profiles above and paste it into config.json", "Remove the outer 'exampleProfiles' wrapper - only keep the profile object", "Save the file and the service will automatically reload the configuration", "You can mix group names (fps, arrows, fkeys, etc.) with individual key names", "Color format is hex RGB: RRGGBB (e.g., FF0000 = red, 00FF00 = green, 0000FF = blue)"],
 		"logLevelOptions": {
@@ -133,6 +162,17 @@
 			"system": "System keys (print screen, scroll lock, pause, insert, home, page up/down, delete, end)",
 			"windows": "Windows key",
 			"all": "All keys (default color)"
+		},
+		"macroKeys": {
+			"description": "Program P1-P5 (and FN+P1-FN+P5) to send key combos or sequences. Macros are stored on the keyboard MCU and persist across power cycles.",
+			"validKeys": "p1, p2, p3, p4, p5, fn+p1, fn+p2, fn+p3, fn+p4, fn+p5",
+			"formats": {
+				"Single key": "{ \"keys\": \"a\" }",
+				"Key combo": "{ \"keys\": \"ctrl+shift+t\" }",
+				"Sequence": "{ \"sequence\": [{ \"keys\": \"ctrl+a\", \"delayMs\": 50 }, { \"keys\": \"ctrl+c\" }] }"
+			},
+			"availableModifiers": "ctrl, shift, alt, win, rctrl, rshift, ralt, altgr, rwin",
+			"availableKeys": "a-z, 0-9, f1-f24, enter, esc, backspace, tab, space, -, =, [, ], \\, ;, ', `, comma, ., /, capslock, printscreen, scrolllock, pause, insert, home, pageup, delete, end, pagedown, right, left, down, up, numlock, numpad0-numpad9, numpad+, numpad-, numpad*, numpad/, numpadenter, numpad., menu"
 		}
 	}
 }

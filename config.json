@@ -12,5 +12,9 @@
 		"numpad": "00FFFF",
 		"windows": "FF6600",
 		"esc": "FF6600"
+	},
+	"macros": {
+		"p1": { "keys": "ctrl+c" },
+		"p2": { "keys": "ctrl+v" }
 	}
 }

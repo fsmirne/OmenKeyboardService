@@ -91,8 +91,9 @@ else
 // Register the background service that will control the keyboard
 builder.Services.AddHostedService<KeyboardRgbService>();
 
-// Register the keyboard controller as a singleton
+// Register the keyboard controllers as singletons
 builder.Services.AddSingleton<OmenKeyboardController>();
+builder.Services.AddSingleton<OmenMacroController>();
 
 // Register config provider
 builder.Services.AddSingleton<KeyboardConfigProvider>();
