@@ -18,11 +18,16 @@ public class LinuxKeyboardHidWriter : IKeyboardHidWriter
         _logger = logger;
     }
 
+    // MCU acknowledgement bytes in the response payload (payload[4], payload[5]).
+    private const byte AckByte4 = 0xEC;
+    private const byte AckByte5 = 0xAC;
+    private const int AckReadTimeoutMs = 500;
+
     public void WriteCommands(byte[][] commands, int[]? delaysBeforeMs = null)
     {
         var devicePath = FindKeyboardHidrawPath();
 
-        using var fs = new FileStream(devicePath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+        using var fs = new FileStream(devicePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
 
         for (int i = 0; i < commands.Length; i++)
         {
@@ -30,12 +35,45 @@ public class LinuxKeyboardHidWriter : IKeyboardHidWriter
             if (delay > 0)
                 Thread.Sleep(delay);
 
-            var buffer = new byte[HidReportSize];
-            buffer[0] = 0; // Report ID 0 (LED)
-            Array.Copy(commands[i], 0, buffer, 1, Math.Min(commands[i].Length, HidReportSize - 1));
-            fs.Write(buffer);
+            var writeBuffer = new byte[HidReportSize];
+            writeBuffer[0] = 0; // Report ID 0 (LED)
+            Array.Copy(commands[i], 0, writeBuffer, 1, Math.Min(commands[i].Length, HidReportSize - 1));
+            fs.Write(writeBuffer);
             fs.Flush();
+
+            VerifyAck(fs, i);
         }
+    }
+
+    /// <summary>
+    /// Reads the MCU's response after a write and verifies the expected ACK bytes. hidraw reads
+    /// are blocking, so we run the read on a background task and cancel via timeout.
+    /// </summary>
+    private static void VerifyAck(FileStream fs, int commandIndex)
+    {
+        var response = new byte[HidReportSize];
+        var readTask = Task.Run(() => fs.Read(response, 0, response.Length));
+
+        if (!readTask.Wait(TimeSpan.FromMilliseconds(AckReadTimeoutMs)))
+            throw new KeyboardWriteVerificationException(commandIndex, null, $"Timed out waiting for MCU ACK on command {commandIndex}");
+
+        int bytesRead = readTask.Result;
+        if (bytesRead < 7)
+            throw new KeyboardWriteVerificationException(commandIndex, response, $"Short MCU response on command {commandIndex}: {bytesRead} bytes");
+
+        // response[0] is the Report ID byte, so payload[4] = response[5].
+        byte payloadByte4 = response[5];
+        byte payloadByte5 = response[6];
+        if (payloadByte4 != AckByte4 || payloadByte5 != AckByte5)
+            throw new KeyboardWriteVerificationException(commandIndex, response, $"MCU did not ACK command {commandIndex}: got [{payloadByte4:X2} {payloadByte5:X2}], expected [{AckByte4:X2} {AckByte5:X2}]");
+    }
+
+    public bool TryForceReenumeration()
+    {
+        // Linux programmatic USB re-enumeration is not implemented yet.
+        // Possible approach: echo the device id into /sys/bus/usb/drivers/usb/unbind then /bind.
+        _logger.LogWarning("Force re-enumeration is not implemented on Linux");
+        return false;
     }
 
     public byte[][] WriteAndReadAll(byte[][] commands, byte reportId = 0, int readTimeoutMs = 2000)

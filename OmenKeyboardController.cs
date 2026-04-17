@@ -66,7 +66,26 @@ public class OmenKeyboardController
             var expandedOverrides = ExpandGroupsToKeys(colorOverrides, groups);
             var (commandTable, delays) = BuildCommandTable(keys, expandedOverrides);
 
-            _hidWriter.WriteCommands(commandTable, delays);
+            try
+            {
+                _hidWriter.WriteCommands(commandTable, delays);
+            }
+            catch (KeyboardWriteVerificationException ex)
+            {
+                // Windows thinks the device is connected and the HID write returned success,
+                // but the MCU didn't acknowledge — the USB endpoint has gone stale (typically
+                // after a signal-only KVM switch briefly power-cycled the keyboard). Force a
+                // full USB re-enumeration to rebuild endpoint state, then retry the sequence
+                // once. If the retry also fails, propagate to the outer retry policy.
+                _logger.LogWarning(ex, "MCU did not ACK command #{Index}. Forcing USB re-enumeration and retrying...", ex.FailedCommandIndex);
+
+                if (!_hidWriter.TryForceReenumeration())
+                    throw;
+
+                _hidWriter.WriteCommands(commandTable, delays);
+                _logger.LogInformation("Colors applied successfully after USB re-enumeration");
+                return;
+            }
 
             _logger.LogInformation("Colors applied successfully");
         }
