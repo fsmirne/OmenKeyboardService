@@ -18,18 +18,22 @@ public class WindowsKeyboardHidWriter : IKeyboardHidWriter
         _logger = logger;
     }
 
-    public void WriteCommands(byte[][] commands)
+    public void WriteCommands(byte[][] commands, int[]? delaysBeforeMs = null)
     {
         var device = FindKeyboardDevice();
         using var stream = device.Open();
 
         int maxSize = device.GetMaxOutputReportLength();
 
-        foreach (var command in commands)
+        for (int i = 0; i < commands.Length; i++)
         {
+            int delay = delaysBeforeMs is not null && i < delaysBeforeMs.Length ? delaysBeforeMs[i] : 0;
+            if (delay > 0)
+                Thread.Sleep(delay);
+
             var buffer = new byte[maxSize];
             buffer[0] = 0; // Report ID 0 (LED)
-            Array.Copy(command, 0, buffer, 1, Math.Min(command.Length, maxSize - 1));
+            Array.Copy(commands[i], 0, buffer, 1, Math.Min(commands[i].Length, maxSize - 1));
             stream.Write(buffer);
         }
     }

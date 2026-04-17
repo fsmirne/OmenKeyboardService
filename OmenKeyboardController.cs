@@ -9,9 +9,22 @@ public class OmenKeyboardController
     private readonly ILogger<OmenKeyboardController> _logger;
     private readonly IKeyboardHidWriter _hidWriter;
 
-    // HID protocol headers - magic bytes that the keyboard firmware expects
-    // HEADER0 is the initialization command sent before any color data
+    // HID protocol headers - magic bytes that the keyboard firmware expects.
+    // The full apply sequence mirrors HP's McuKBLightingHSAClient.SetKeyColor(..., enabelUersMode: true):
+    //   LIGHTING_ON -> (50ms) -> USER_MODE_ON -> (50ms) -> KEY_UNLOCK -> (50ms) -> 9 color pages -> (50ms) -> KEY_LOCK
+    // Without LIGHTING_ON the MCU silently drops color writes after a sleep/wake cycle (firmware holds LED power off for standby).
+
+    // SetKeyBoardLightingOn: Command=9, BLength_low=1, InfoBytes[0]=0xFF — turns the LED controller on.
+    private const string HEADER_LIGHTING_ON = "09000100ff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+    // SetUserModeEnable: Command=4, BLength_low=2, InfoBytes=0xFC,0xEA — switches the MCU to user (per-key) mode.
     private const string HEADER0 = "04000200fcea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+    // SetAllKeyCanBeChange(true): Command=4, Index=1, BLength_low=18, all zeros — unlocks keys for color writes.
+    private const string HEADER_KEY_UNLOCK = "04011200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+    // SetAllKeyCanBeChange(false): Command=4, Index=1, BLength_low=18, 18 bytes of 0xFF — commits/locks the written colors.
+    private const string HEADER_KEY_LOCK = "04011200ffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
     // HEADER1-9 are command headers for the color data packets
     // Each set of 3 headers (1-3, 4-6, 7-9) contains R, G, B values at different bit offsets (16, 8, 0)
@@ -24,6 +37,8 @@ public class OmenKeyboardController
     private const string HEADER7 = "07003c00";  // Third batch, Red component
     private const string HEADER8 = "07013c00";  // Third batch, Green component
     private const string HEADER9 = "07021800";  // Third batch, Blue component
+
+    private const int PhaseDelayMs = 50;
 
     // Body templates define which keys are controlled in each packet
     // 'ff' = active key slot (will be replaced with color data)
@@ -49,9 +64,9 @@ public class OmenKeyboardController
 
             var (keys, groups) = GetKeyboardLayout();
             var expandedOverrides = ExpandGroupsToKeys(colorOverrides, groups);
-            var commandTable = BuildCommandTable(keys, expandedOverrides);
+            var (commandTable, delays) = BuildCommandTable(keys, expandedOverrides);
 
-            _hidWriter.WriteCommands(commandTable);
+            _hidWriter.WriteCommands(commandTable, delays);
 
             _logger.LogInformation("Colors applied successfully");
         }
@@ -83,9 +98,10 @@ public class OmenKeyboardController
     }
 
     /// <summary>
-    /// Builds the HID command table with RGB color data for all keys
+    /// Builds the HID command table with RGB color data for all keys, plus the phase-boundary
+    /// delays (in ms) required by the MCU. Sequence matches HP's official SetKeyColor pipeline.
     /// </summary>
-    private static byte[][] BuildCommandTable(List<string> keys, Dictionary<string, uint> overrides)
+    private static (byte[][] commands, int[] delaysBeforeMs) BuildCommandTable(List<string> keys, Dictionary<string, uint> overrides)
     {
         var lines = new (string header, string body, int offset)[]
         {
@@ -102,7 +118,12 @@ public class OmenKeyboardController
 
         const uint DEFAULT_COLOR = 0xFFFFFF; // White
 
-        var result = new List<byte[]> { DecodeHex(HEADER0) };
+        var commands = new List<byte[]>
+        {
+            DecodeHex(HEADER_LIGHTING_ON),
+            DecodeHex(HEADER0),           // SetUserModeEnable
+            DecodeHex(HEADER_KEY_UNLOCK),
+        };
 
         for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
         {
@@ -130,10 +151,20 @@ public class OmenKeyboardController
                 });
 
             commandBytes.AddRange(bodyBytes);
-            result.Add(commandBytes.ToArray());
+            commands.Add(commandBytes.ToArray());
         }
 
-        return result.ToArray();
+        commands.Add(DecodeHex(HEADER_KEY_LOCK));
+
+        // Phase-boundary delays. OGH delays 50ms before mode transitions, but not between
+        // consecutive color pages. Index 0 has no pre-delay (it's the first command).
+        var delays = new int[commands.Count];
+        delays[1] = PhaseDelayMs;                    // before HEADER0 (user mode on)
+        delays[2] = PhaseDelayMs;                    // before HEADER_KEY_UNLOCK
+        delays[3] = PhaseDelayMs;                    // before first color page
+        delays[commands.Count - 1] = PhaseDelayMs;   // before HEADER_KEY_LOCK
+
+        return (commands.ToArray(), delays);
     }
 
     private static byte[] DecodeHex(string hexString)

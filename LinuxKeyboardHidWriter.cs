@@ -18,17 +18,21 @@ public class LinuxKeyboardHidWriter : IKeyboardHidWriter
         _logger = logger;
     }
 
-    public void WriteCommands(byte[][] commands)
+    public void WriteCommands(byte[][] commands, int[]? delaysBeforeMs = null)
     {
         var devicePath = FindKeyboardHidrawPath();
 
         using var fs = new FileStream(devicePath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
 
-        foreach (var command in commands)
+        for (int i = 0; i < commands.Length; i++)
         {
+            int delay = delaysBeforeMs is not null && i < delaysBeforeMs.Length ? delaysBeforeMs[i] : 0;
+            if (delay > 0)
+                Thread.Sleep(delay);
+
             var buffer = new byte[HidReportSize];
             buffer[0] = 0; // Report ID 0 (LED)
-            Array.Copy(command, 0, buffer, 1, Math.Min(command.Length, HidReportSize - 1));
+            Array.Copy(commands[i], 0, buffer, 1, Math.Min(commands[i].Length, HidReportSize - 1));
             fs.Write(buffer);
             fs.Flush();
         }

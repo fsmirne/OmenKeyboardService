@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # claude code
 .claude
+
+# Reverse-engineering reference material (copyrighted binaries, not part of the build)
+refs/

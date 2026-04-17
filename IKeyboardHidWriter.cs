@@ -6,7 +6,14 @@ namespace OmenKeyboardService;
 /// </summary>
 public interface IKeyboardHidWriter
 {
-    void WriteCommands(byte[][] commands);
+    /// <summary>
+    /// Writes a sequence of HID commands to the keyboard (Report ID 0).
+    /// If <paramref name="delaysBeforeMs"/> is supplied, element i specifies how many
+    /// milliseconds to wait before writing <c>commands[i]</c> (the first element applies
+    /// before the first command). A null array or a shorter array implies zero delay for
+    /// the remaining commands.
+    /// </summary>
+    void WriteCommands(byte[][] commands, int[]? delaysBeforeMs = null);
 
     /// <summary>
     /// Sends multiple commands sequentially, reading a response after each.
