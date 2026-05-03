@@ -58,12 +58,14 @@ public class LinuxKeyboardHidWriter : IKeyboardHidWriter
             throw new KeyboardWriteVerificationException(commandIndex, null, $"Timed out waiting for MCU ACK on command {commandIndex}");
 
         int bytesRead = readTask.Result;
-        if (bytesRead < 7)
+        if (bytesRead < 6)
             throw new KeyboardWriteVerificationException(commandIndex, response, $"Short MCU response on command {commandIndex}: {bytesRead} bytes");
 
-        // response[0] is the Report ID byte, so payload[4] = response[5].
-        byte payloadByte4 = response[5];
-        byte payloadByte5 = response[6];
+        // Linux hidraw reads for Report ID 0 (unnumbered reports) do NOT include a Report ID prefix
+        // byte. The payload starts directly at response[0], so payload[4] = response[4].
+        // (Windows HID reads do include the Report ID byte, making payload[4] = response[5].)
+        byte payloadByte4 = response[4];
+        byte payloadByte5 = response[5];
         if (payloadByte4 != AckByte4 || payloadByte5 != AckByte5)
             throw new KeyboardWriteVerificationException(commandIndex, response, $"MCU did not ACK command {commandIndex}: got [{payloadByte4:X2} {payloadByte5:X2}], expected [{AckByte4:X2} {AckByte5:X2}]");
     }
