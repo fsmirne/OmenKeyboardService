@@ -10,7 +10,6 @@ namespace OmenKeyboardService;
 public class LinuxPlatformService : PlatformServiceBase
 {
     private FileSystemWatcher? _deviceWatcher;
-    private FileSystemWatcher? _sleepWatcher;
     private CancellationTokenSource? _suspendMonitorCts;
 
     public override string PlatformName => "Linux";
@@ -64,78 +63,44 @@ public class LinuxPlatformService : PlatformServiceBase
     }
 
     /// <summary>
-    /// Sets up monitoring for system suspend/resume events
-    /// Uses systemd's sleep.target or monitors /sys/power/state changes
+    /// Sets up monitoring for system resume via wall-clock gap detection.
     /// </summary>
     private void SetupSuspendResumeMonitoring()
     {
-        try
-        {
-            // Try to monitor systemd sleep/wake events via systemd-sleep directory
-            // When system resumes, systemd runs scripts in /lib/systemd/system-sleep/
-            // We can monitor for resume by watching for specific file access patterns
-
-            // Alternative: Monitor /sys/power/wakeup_count which changes on resume
-            const string wakeupCountPath = "/sys/power/wakeup_count";
-            if (File.Exists(wakeupCountPath))
-            {
-                _suspendMonitorCts = new CancellationTokenSource();
-                _ = MonitorSuspendResumeAsync(wakeupCountPath, _suspendMonitorCts.Token);
-                _logger.LogInformation("Suspend/resume monitoring enabled via wakeup_count");
-            }
-            else
-            {
-                // Fallback: Monitor /run/systemd/inhibit for lock file changes
-                const string inhibitPath = "/run/systemd/inhibit";
-                if (Directory.Exists(inhibitPath))
-                {
-                    _sleepWatcher = new FileSystemWatcher(inhibitPath)
-                    {
-                        NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
-                        EnableRaisingEvents = true
-                    };
-                    _sleepWatcher.Deleted += OnSleepInhibitorReleased;
-                    _logger.LogInformation("Suspend/resume monitoring enabled via inhibitor directory");
-                }
-                else
-                {
-                    _logger.LogWarning("Could not set up suspend/resume monitoring. Resume detection may not work.");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to set up suspend/resume monitoring");
-        }
+        _suspendMonitorCts = new CancellationTokenSource();
+        _ = MonitorSuspendResumeAsync(_suspendMonitorCts.Token);
+        _logger.LogInformation("Suspend/resume monitoring enabled (wall-clock gap detection)");
     }
 
     /// <summary>
-    /// Monitors the wakeup_count file for changes indicating system resume
+    /// Detects resume from suspend by watching for a wall-clock jump. The system clock
+    /// does not advance while suspended, so if substantially more wall-clock time elapses
+    /// than the poll interval, the machine was asleep in between.
+    ///
+    /// This replaces polling /sys/power/wakeup_count, which is NOT a resume counter: the
+    /// kernel increments it on every wakeup event from any wakeup-capable device (USB,
+    /// mouse, NIC, ...) during normal operation, so it changed constantly and triggered
+    /// spurious color reapplications.
     /// </summary>
-    private async Task MonitorSuspendResumeAsync(string wakeupCountPath, CancellationToken cancellationToken)
+    private async Task MonitorSuspendResumeAsync(CancellationToken cancellationToken)
     {
+        const int PollIntervalMs = 10000;
+        // A suspend is inferred when elapsed wall-clock time exceeds the poll interval
+        // by more than this slack, which absorbs scheduler jitter under load.
+        const int SuspendThresholdMs = 5000;
+
         try
         {
-            string lastValue = File.ReadAllText(wakeupCountPath).Trim();
-
             while (!cancellationToken.IsCancellationRequested)
             {
-                await Task.Delay(1000, cancellationToken);
+                var expectedWake = DateTime.UtcNow.AddMilliseconds(PollIntervalMs);
+                await Task.Delay(PollIntervalMs, cancellationToken);
 
-                try
+                var driftMs = (DateTime.UtcNow - expectedWake).TotalMilliseconds;
+                if (driftMs > SuspendThresholdMs)
                 {
-                    string currentValue = File.ReadAllText(wakeupCountPath).Trim();
-                    if (currentValue != lastValue)
-                    {
-                        _logger.LogInformation("System resumed from suspend (wakeup_count changed: {Old} -> {New})", lastValue, currentValue);
-                        lastValue = currentValue;
-
-                        RequestColorReapply("System resumed from suspend", 2000, 5);
-                    }
-                }
-                catch (IOException)
-                {
-                    // File may be temporarily unavailable during suspend
+                    _logger.LogInformation("System resumed from suspend (slept ~{Seconds}s)", (int)(driftMs / 1000));
+                    RequestColorReapply("System resumed from suspend", 2000, 5);
                 }
             }
         }
@@ -146,22 +111,6 @@ public class LinuxPlatformService : PlatformServiceBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error in suspend/resume monitor");
-        }
-    }
-
-    /// <summary>
-    /// Handles sleep inhibitor release events (system waking up)
-    /// </summary>
-    private void OnSleepInhibitorReleased(object sender, FileSystemEventArgs e)
-    {
-        try
-        {
-            _logger.LogInformation("Sleep inhibitor released (possible resume): {Name}", e.Name);
-            RequestColorReapply("Possible system resume detected", 2000, 5);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error handling sleep inhibitor event");
         }
     }
 
@@ -239,7 +188,6 @@ public class LinuxPlatformService : PlatformServiceBase
     {
         try { _suspendMonitorCts?.Cancel(); } catch (ObjectDisposedException) { }
         _suspendMonitorCts?.Dispose();
-        _sleepWatcher?.Dispose();
         _deviceWatcher?.Dispose();
     }
 }
