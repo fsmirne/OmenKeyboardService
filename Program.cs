@@ -7,6 +7,7 @@ var builder = Host.CreateApplicationBuilder(args);
 // Detect the operating system
 bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 bool isLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+bool isOsx = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
 
 // Read log level from config.json
 LogLevel minimumLogLevel = LogLevel.Warning; // Default to Warning
@@ -67,6 +68,7 @@ else if (isLinux)
     builder.Services.AddSystemd();
 #endif
 }
+// macOS: launchd manages the process directly; no host lifetime package needed.
 
 // Register platform-specific service implementations
 if (isWindows)
@@ -83,9 +85,16 @@ else if (isLinux)
     builder.Services.AddSingleton<IKeyboardHidWriter, LinuxKeyboardHidWriter>();
 #endif
 }
+else if (isOsx)
+{
+#if OSX
+    builder.Services.AddSingleton<IPlatformService, OsxPlatformService>();
+    builder.Services.AddSingleton<IKeyboardHidWriter, OsxKeyboardHidWriter>();
+#endif
+}
 else
 {
-    throw new PlatformNotSupportedException("This service only supports Windows and Linux platforms.");
+    throw new PlatformNotSupportedException("This service only supports Windows, Linux, and macOS platforms.");
 }
 
 // Register the background service that will control the keyboard

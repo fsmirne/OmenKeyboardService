@@ -5,17 +5,19 @@ A cross-platform service that controls RGB LED colors and programmable macro key
 **Supported Platforms:**
 - ✅ Windows 10/11 (Windows Service)
 - ✅ Linux (systemd service) - Ubuntu 20.04+, Debian, Fedora, Arch, etc.
+- ✅ macOS (launchd daemon) - Apple Silicon and Intel
 
 ## Features
 
 - **RGB LED Control**: Full per-key RGB color control with key groups and individual key targeting
 - **Programmable Macro Keys**: Program P1-P5 and FN+P1-FN+P5 with key combos, sequences, and delays
 - **Automatic Startup**: Runs as a system service (Windows Service or systemd) that starts when the OS boots
-- **Cross-Platform**: Single codebase works on both Windows and Linux
+- **Cross-Platform**: Single codebase works on Windows, Linux, and macOS
 - **USB Reconnection**: Automatically detects keyboard reconnection and restores colors when using KVM switches or replug events
 - **Platform-Specific Features**:
   - **Windows**: Power management (sleep/wake), session lock/unlock detection, display power monitoring, user presence detection, WMI device monitoring
-  - **Linux**: Power management (suspend/resume), device monitoring via /dev filesystem with smart keyboard detection
+  - **Linux**: Power management (suspend/resume via wall-clock gap detection), device monitoring via /dev filesystem with smart keyboard detection
+  - **macOS**: Power management (suspend/resume via wall-clock gap detection), device monitoring via HidSharp's device list
 - **JSON Configuration**: Easy-to-edit configuration file for color profiles and macro assignments
 - **Hot Reload**: Automatically detects config file changes and applies new colors and macros
 - **Key Groups**: Control multiple keys at once (WASD, arrows, function keys, etc.)
@@ -36,11 +38,17 @@ A cross-platform service that controls RGB LED colors and programmable macro key
 - Ubuntu 20.04+ or any Linux distribution with systemd
 - Root/sudo access (for service installation and HID device access)
 
+### macOS Requirements
+- macOS with Apple Silicon or Intel
+- Root/sudo access (for service installation)
+- The keyboard connected via a USB hub/dock, since it's a peripheral, not the built-in keyboard
+
 ## Installation
 
 Choose your platform:
 - [Windows Installation](#windows-installation)
 - [Linux Installation](#linux-installation)
+- [macOS Installation](#macos-installation)
 
 ### Windows Installation
 
@@ -134,6 +142,46 @@ The installation script will:
 - Install and start the systemd service
 - Enable the service to start at boot
 
+### macOS Installation
+
+#### Step 1: Install .NET 10 SDK
+
+Download and install from: https://docs.microsoft.com/en-us/dotnet/core/install/macos
+
+#### Step 2: Build the Project
+
+```bash
+chmod +x build-mac.sh
+./build-mac.sh
+```
+
+Or manually (use `osx-arm64` for Apple Silicon, `osx-x64` for Intel):
+
+```bash
+dotnet publish -c Release -r osx-arm64 --self-contained true /p:PublishSingleFile=true
+```
+
+The compiled service will be in: `bin/Release/net10.0/osx-arm64/publish/`
+
+#### Step 3: Install the Service
+
+Navigate to the publish directory and run the install script:
+
+```bash
+cd bin/Release/net10.0/osx-arm64/publish/
+chmod +x install-service-mac.sh
+sudo ./install-service-mac.sh
+```
+
+The installation script will:
+- Copy files to `/usr/local/bin/omen-keyboard-rgb/`
+- Install a `launchd` LaunchDaemon (`local.omen-keyboard-rgb`)
+- Start the service and enable it to run at boot
+
+#### Step 4: Grant Input Monitoring Permission (if needed)
+
+The keyboard exposes its LED control on a vendor-specific HID usage page, which normally doesn't require special permission. If colors don't apply after install, check logs first (`tail -f /var/log/omen-keyboard-rgb.log`); if macOS is silently blocking HID access, grant permission at **System Settings → Privacy & Security → Input Monitoring** and add `OmenKeyboardService`, then restart the service.
+
 ## Configuration
 
 ### Config File Location
@@ -142,6 +190,7 @@ The service looks for `config.json` in the same directory as the executable:
 
 - **Windows**: Same folder as `OmenKeyboardService.exe` (e.g., `C:\Program Files\OmenKeyboardService\config.json`)
 - **Linux**: `/usr/local/bin/omen-keyboard-rgb/config.json`
+- **macOS**: `/usr/local/bin/omen-keyboard-rgb/config.json`
 
 ### Basic Configuration
 
@@ -422,6 +471,36 @@ sudo journalctl -u omen-keyboard-rgb -f
 sudo journalctl -u omen-keyboard-rgb -n 50
 ```
 
+### macOS Service Management
+
+#### Using Shell Scripts
+
+All scripts must be run with sudo:
+
+- **`sudo ./install-service-mac.sh`** - Install and start the service
+- **`sudo ./uninstall-service-mac.sh`** - Stop and remove the service
+- **`sudo ./start-service-mac.sh`** - Start the service
+- **`sudo ./stop-service-mac.sh`** - Stop the service
+
+#### Using launchctl Commands
+
+```bash
+# Start the service
+sudo launchctl bootstrap system /Library/LaunchDaemons/local.omen-keyboard-rgb.plist
+
+# Stop the service
+sudo launchctl bootout system /Library/LaunchDaemons/local.omen-keyboard-rgb.plist
+
+# Restart the service
+sudo launchctl kickstart -k system/local.omen-keyboard-rgb
+
+# Check status
+sudo launchctl print system/local.omen-keyboard-rgb
+
+# View logs in real-time
+tail -f /var/log/omen-keyboard-rgb.log
+```
+
 ## Troubleshooting
 
 ### Common Issues (All Platforms)
@@ -434,15 +513,19 @@ sudo journalctl -u omen-keyboard-rgb -n 50
    # Windows: Check Device Manager
    # Linux: Check USB devices
    lsusb | grep 03f0:1f41
+   # macOS: Check USB devices
+   system_profiler SPUSBDataType | grep -A 3 "0x03f0"
    ```
 
 2. **Verify config file**: Make sure `config.json` exists in the correct location
    - Windows: Same folder as `OmenKeyboardService.exe`
    - Linux: `/usr/local/bin/omen-keyboard-rgb/config.json`
+   - macOS: `/usr/local/bin/omen-keyboard-rgb/config.json`
 
 3. **Check service logs**:
    - Windows: Event Viewer (see below)
    - Linux: `sudo journalctl -u omen-keyboard-rgb -n 50`
+   - macOS: `tail -f /var/log/omen-keyboard-rgb.log`
 
 ### Windows-Specific Troubleshooting
 
@@ -499,6 +582,34 @@ Reload udev rules if needed:
 ```bash
 sudo udevadm control --reload-rules
 sudo udevadm trigger
+```
+
+### macOS-Specific Troubleshooting
+
+#### Check Service Status
+
+```bash
+sudo launchctl print system/local.omen-keyboard-rgb
+```
+
+#### View Logs
+
+```bash
+# Follow logs in real-time
+tail -f /var/log/omen-keyboard-rgb.log
+
+# View recent logs
+tail -n 50 /var/log/omen-keyboard-rgb.log
+```
+
+#### Check Input Monitoring Permission
+
+The keyboard's LED control interface is a vendor-specific HID usage page, which normally doesn't need extra TCC permission. If the service can't open the device, grant it explicitly:
+
+**System Settings → Privacy & Security → Input Monitoring** → add `OmenKeyboardService`, then restart the service:
+
+```bash
+sudo launchctl kickstart -k system/local.omen-keyboard-rgb
 ```
 
 ### Colors Not Applying
@@ -558,7 +669,7 @@ If colors don't restore when returning from screen timeout:
 
 #### Linux: Colors Reset After Suspend/Resume
 
-The service monitors system suspend/resume events by watching `/sys/power/wakeup_count` for changes. When the system resumes from suspend, the service automatically restores colors after a 2-second delay to allow hardware to initialize.
+The service detects suspend/resume by watching for a wall-clock jump: the system clock doesn't advance while suspended, so if much more wall-clock time elapses than the poll interval, the machine was asleep in between. When resume is detected, the service restores colors after a 2-second delay to allow hardware to initialize.
 
 If colors don't restore after suspend/resume:
 
@@ -566,12 +677,21 @@ If colors don't restore after suspend/resume:
    ```bash
    sudo journalctl -u omen-keyboard-rgb -n 20 | grep -i "resumed\|suspend"
    ```
-2. **Verify wakeup_count is accessible**: The service monitors `/sys/power/wakeup_count`
+2. **Verify service is running**: Check `sudo systemctl status omen-keyboard-rgb`
+3. **Manual trigger**: Edit and save `config.json` to manually reapply colors
+
+#### macOS: Colors Reset After Suspend/Resume
+
+Same wall-clock gap detection as Linux (see above). When resume is detected, the service restores colors after a 2-second delay.
+
+If colors don't restore after suspend/resume:
+
+1. **Check logs**: Look for "System resumed from suspend" messages
    ```bash
-   cat /sys/power/wakeup_count
+   grep -i "resumed\|suspend" /var/log/omen-keyboard-rgb.log
    ```
-3. **Verify service is running**: Check `sudo systemctl status omen-keyboard-rgb`
-4. **Manual trigger**: Edit and save `config.json` to manually reapply colors
+2. **Verify service is running**: `sudo launchctl print system/local.omen-keyboard-rgb`
+3. **Manual trigger**: Edit and save `config.json` to manually reapply colors
 
 ### KVM Switch / USB Reconnection (All Platforms)
 
@@ -583,12 +703,14 @@ The service automatically detects keyboard reconnection and restores colors. Thi
 
 **Windows**: Uses WMI events to instantly detect the HP Omen keyboard specifically (within 500ms)
 **Linux**: Monitors /dev/hidraw* for new device creation, verifies via sysfs that it's the HP Omen keyboard (VID:03F0, PID:1F41) before triggering (within 1.5 seconds)
+**macOS**: Watches HidSharp's device list (backed by IOKit) for the HP Omen keyboard's absent-to-present transition (within 1.5 seconds)
 
 If colors don't restore after reconnection:
 
 1. **Check logs**:
    - Windows: Event Viewer for "HP Omen keyboard reconnected" messages
    - Linux: `sudo journalctl -u omen-keyboard-rgb -f` for "HP Omen keyboard detected" messages
+   - macOS: `tail -f /var/log/omen-keyboard-rgb.log` for "HP Omen keyboard detected" messages
 2. **Check USB power**: Some KVM switches may not provide adequate power to the keyboard
 3. **Manual trigger**: Edit and save `config.json` to manually reapply colors
 
@@ -628,6 +750,24 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
+### macOS
+
+Run the uninstall script:
+
+```bash
+cd /usr/local/bin/omen-keyboard-rgb
+sudo ./uninstall-service-mac.sh
+```
+
+Or manually:
+
+```bash
+sudo launchctl bootout system /Library/LaunchDaemons/local.omen-keyboard-rgb.plist
+sudo rm /Library/LaunchDaemons/local.omen-keyboard-rgb.plist
+sudo rm -rf /usr/local/bin/omen-keyboard-rgb
+sudo rm /var/log/omen-keyboard-rgb.log
+```
+
 ## Technical Details
 
 ### Architecture
@@ -636,8 +776,10 @@ The service uses a cross-platform architecture with platform-specific implementa
 
 - **Common Code**: `KeyboardRgbService`, `OmenKeyboardController` (RGB), `OmenMacroController` (macros), `HidKeyCodes` (key mapping)
 - **Platform Abstraction**: `IPlatformService` interface, `IKeyboardHidWriter` interface
-- **Windows Implementation**: `WindowsPlatformService` - WMI device monitoring, power events (sleep/wake), session events (lock/unlock/logon), display power notifications, user presence detection
-- **Linux Implementation**: `LinuxPlatformService` - /dev filesystem monitoring with keyboard-specific filtering, suspend/resume detection via sysfs wakeup_count monitoring
+- **Windows Implementation**: `WindowsPlatformService` - WMI device monitoring, power events (sleep/wake), session events (lock/unlock/logon), display power notifications, user presence detection. `WindowsKeyboardHidWriter` (HidSharp) adds SetupAPI-based USB re-enumeration
+- **Linux Implementation**: `LinuxPlatformService` - /dev filesystem monitoring with keyboard-specific filtering, suspend/resume detection via wall-clock gap monitoring. `LinuxKeyboardHidWriter` talks to `/dev/hidraw*` directly
+- **macOS Implementation**: `OsxPlatformService` - device monitoring via HidSharp's device list, suspend/resume detection via wall-clock gap monitoring (shared with Linux, see `PlatformServiceBase.MonitorSuspendResumeAsync`). `OsxKeyboardHidWriter` uses HidSharp's IOKit backend; USB re-enumeration is not implemented (would require IOKit P/Invoke, which was deliberately avoided)
+- **Shared HidSharp Backend**: `HidSharpKeyboardHidWriter` implements the read/write/ACK protocol once for both Windows and macOS; each platform subclass only adds its `TryForceReenumeration` behavior
 
 ### How It Works
 
@@ -649,7 +791,8 @@ The service uses a cross-platform architecture with platform-specific implementa
 6. Monitors config file for changes and reloads automatically
 7. Monitors platform-specific events:
    - **Windows**: Power events (sleep/wake), session events (lock/unlock), display power state changes, user presence detection (idle/active), WMI USB device arrival
-   - **Linux**: Power events (suspend/resume via wakeup_count), /dev/hidraw* device creation with keyboard-specific filtering via sysfs
+   - **Linux**: Power events (suspend/resume via wall-clock gap detection), /dev/hidraw* device creation with keyboard-specific filtering via sysfs
+   - **macOS**: Power events (suspend/resume via wall-clock gap detection), HidSharp device list changes filtered to the HP Omen keyboard
 8. Automatically restores colors when keyboard reconnects (KVM switches, USB replug, etc.)
 
 ### HID Protocol
@@ -714,9 +857,24 @@ sudo journalctl -u omen-keyboard-rgb -p err..warning
 sudo journalctl -u omen-keyboard-rgb > keyboard-service.log
 ```
 
+#### macOS Logging
+
+Logs are written to a plain text file via the `launchd` job's `StandardOutPath`/`StandardErrorPath`.
+
+**Log Location:** `/var/log/omen-keyboard-rgb.log`
+
+**View logs:**
+```bash
+# Follow logs in real-time
+tail -f /var/log/omen-keyboard-rgb.log
+
+# View last 50 entries
+tail -n 50 /var/log/omen-keyboard-rgb.log
+```
+
 #### Important Log Messages
 
-Look for these messages in the logs (both platforms):
+Look for these messages in the logs (all platforms):
 - `HP Omen Keyboard RGB Service starting on [Platform]...` - Service initialization
 - `Service started successfully. Monitoring for config changes and platform events...` - Service ready
 - `Applying profile: [ProfileName]` - Loading configuration
@@ -724,6 +882,7 @@ Look for these messages in the logs (both platforms):
 - Platform-specific events:
   - Windows: `System resumed from sleep`, `Session unlocked`, `Display powered ON`, `User presence detected (returned from idle)`, `HP Omen keyboard reconnected (KVM switch or USB replug detected)`
   - Linux: `System resumed from suspend`, `HP Omen keyboard detected`, `New HID device detected`
+  - macOS: `System resumed from suspend`, `HP Omen keyboard detected`
 - `Successfully applied colors on attempt X` - Colors applied after retry
 - `Failed to apply colors after X attempts` - All retries exhausted
 

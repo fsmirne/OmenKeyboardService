@@ -10,11 +10,14 @@
   </PropertyGroup>
 
   <!-- Default to the current platform's RID when none is specified -->
-  <PropertyGroup Condition="'$(RuntimeIdentifier)' == '' AND '$(OS)' != 'Windows_NT'">
-    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
-  </PropertyGroup>
   <PropertyGroup Condition="'$(RuntimeIdentifier)' == '' AND '$(OS)' == 'Windows_NT'">
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == '' AND '$([MSBuild]::IsOSPlatform(`OSX`))' == 'true'">
+    <RuntimeIdentifier>osx-arm64</RuntimeIdentifier>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == '' AND '$(OS)' != 'Windows_NT' AND '$([MSBuild]::IsOSPlatform(`OSX`))' != 'true'">
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
   </PropertyGroup>
 
   <!-- Define conditional compilation symbols based on target platform -->
@@ -24,6 +27,10 @@
 
   <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
     <DefineConstants>$(DefineConstants);LINUX</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+    <DefineConstants>$(DefineConstants);OSX</DefineConstants>
   </PropertyGroup>
 
   <!-- Reverse-engineering reference material; not part of the build. -->
@@ -53,6 +60,11 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.5" />
   </ItemGroup>
 
+  <!-- macOS-specific packages -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+    <PackageReference Include="HidSharp" Version="2.1.0" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="config.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -69,6 +81,13 @@
   <!-- Linux-specific scripts and service file -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
     <None Update="install-service.sh;uninstall-service.sh;start-service.sh;stop-service.sh;omen-keyboard-rgb.service">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- macOS-specific scripts and launchd job -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+    <None Update="install-service-mac.sh;uninstall-service-mac.sh;start-service-mac.sh;stop-service-mac.sh;local.omen-keyboard-rgb.plist">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

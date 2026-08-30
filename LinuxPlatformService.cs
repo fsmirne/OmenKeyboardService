@@ -73,48 +73,6 @@ public class LinuxPlatformService : PlatformServiceBase
     }
 
     /// <summary>
-    /// Detects resume from suspend by watching for a wall-clock jump. The system clock
-    /// does not advance while suspended, so if substantially more wall-clock time elapses
-    /// than the poll interval, the machine was asleep in between.
-    ///
-    /// This replaces polling /sys/power/wakeup_count, which is NOT a resume counter: the
-    /// kernel increments it on every wakeup event from any wakeup-capable device (USB,
-    /// mouse, NIC, ...) during normal operation, so it changed constantly and triggered
-    /// spurious color reapplications.
-    /// </summary>
-    private async Task MonitorSuspendResumeAsync(CancellationToken cancellationToken)
-    {
-        const int PollIntervalMs = 10000;
-        // A suspend is inferred when elapsed wall-clock time exceeds the poll interval
-        // by more than this slack, which absorbs scheduler jitter under load.
-        const int SuspendThresholdMs = 5000;
-
-        try
-        {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var expectedWake = DateTime.UtcNow.AddMilliseconds(PollIntervalMs);
-                await Task.Delay(PollIntervalMs, cancellationToken);
-
-                var driftMs = (DateTime.UtcNow - expectedWake).TotalMilliseconds;
-                if (driftMs > SuspendThresholdMs)
-                {
-                    _logger.LogInformation("System resumed from suspend (slept ~{Seconds}s)", (int)(driftMs / 1000));
-                    RequestColorReapply("System resumed from suspend", 2000, 5);
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected when service stops
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error in suspend/resume monitor");
-        }
-    }
-
-    /// <summary>
     /// Handles device creation events and reapplies colors when the HP Omen keyboard is detected
     /// </summary>
     private void OnDeviceCreated(object sender, FileSystemEventArgs e)
